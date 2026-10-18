@@ -1,0 +1,20 @@
+{
+  "name": "athleteconnect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AthleteConnect — Sports Coaching Platform Monorepo Foundation (Phase 1)",
+  "scripts": {
+    "dev:admin": "npm --prefix admin run dev",
+    "build:admin": "npm --prefix admin run build",
+    "test:admin": "npm --prefix admin run test",
+    "lint:admin": "npm --prefix admin run lint",
+    "start:mobile": "npm --prefix mobile run start",
+    "mobile:android": "npm --prefix mobile run android",
+    "mobile:ios": "npm --prefix mobile run ios",
+    "mobile:web": "npm --prefix mobile run web",
+    "typecheck:mobile": "npm --prefix mobile run typecheck",
+    "typecheck:admin": "npm --prefix admin run typecheck",
+    "typecheck": "npm run typecheck:admin && npm run typecheck:mobile",
+    "check:all": "npm run typecheck:admin && npm run typecheck:mobile && npm run lint:admin && npm run test:admin"
+  }
+}
