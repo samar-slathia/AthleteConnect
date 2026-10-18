@@ -1,11 +1,11 @@
-# AthleteConnect — Phase 1: Foundation
+# AthleteConnect
 
 AthleteConnect is a multi-sided sports coaching platform connecting athletes, parents, and coaches across combat sports and athletic disciplines (such as Boxing, Wushu, and Kickboxing).
 
-This repository contains the **Phase 1: Foundation Only** implementation. It establishes a clean, beginner-friendly monorepo consisting of:
-- **`mobile/`**: React Native & Expo app with TypeScript for Parent/Guardian, Individual Customer, and Player/Coach.
+The monorepo contains:
+- **`mobile/`**: React Native & Expo app (SDK 57) with TypeScript for Parent/Guardian, Individual Customer, and Player/Coach.
 - **`admin/`**: Standalone React + Vite operations dashboard with TypeScript.
-- **No Backend**: Real authentication, databases, bookings, payment processing, OTP, notifications, and coach verification will be introduced in subsequent phases.
+- **`server/`**: Standalone Node.js, Express, and TypeScript backend API foundation with MongoDB/Mongoose (Phase 2A).
 
 ---
 
@@ -30,56 +30,48 @@ AthleteConnect uses a strict design token system applied consistently across bot
 ```
 AthleteConnect/
 ├── .gitignore                      # Excludes node_modules, .expo, dist, environment files, logs
-├── README.md                       # Architecture, setup guide, PowerShell commands, & Phase 1 documentation
-├── package.json                    # Root scripts for running and checking both applications
+├── README.md                       # Monorepo architecture, setup guide, & PowerShell commands
+├── package.json                    # Root scripts for running and checking all applications
 ├── mobile/                         # React Native / Expo application
 │   ├── assets/                     # App icons and splash screens
 │   ├── src/
-│   │   ├── components/             # Reusable UI components
-│   │   │   ├── Badge.tsx           # Status and category pill badges
-│   │   │   ├── Button.tsx          # Lime-accented prominent action buttons
-│   │   │   ├── Header.tsx          # AthleteConnect branding header
-│   │   │   ├── NoticeBanner.tsx    # Phase 1 disclaimer notice
-│   │   │   └── RoleCard.tsx        # Accessible role selection cards with check state
-│   │   ├── data/
-│   │   │   ├── roles.ts            # Role specifications (Parent, Individual, Coach)
-│   │   │   └── sports.ts           # Demo categories (Boxing, Wushu, Kickboxing)
-│   │   ├── navigation/
-│   │   │   ├── AppNavigator.tsx    # Native stack navigator
-│   │   │   └── types.ts            # Strongly typed screen parameters
-│   │   ├── screens/
-│   │   │   ├── RoleSelectionScreen.tsx  # Initial screen with 3 role choices
-│   │   │   └── RolePreviewScreen.tsx    # Role detail and sports discovery preview
-│   │   └── theme/
-│   │       └── tokens.ts           # Centralized color, typography, spacing, and radius tokens
+│   │   ├── components/             # Reusable UI components (Button, RoleCard, Header, Badge, NoticeBanner)
+│   │   ├── data/                   # Role specifications (roles.ts) and sample sports (sports.ts)
+│   │   ├── navigation/             # AppNavigator.tsx and types.ts
+│   │   ├── screens/                # WelcomeScreen.tsx, RoleSelectionScreen.tsx, RolePreviewScreen.tsx
+│   │   └── theme/                  # Centralized locked design tokens
 │   ├── App.tsx                     # Entry point mounting NavigationContainer & SafeAreaProvider
-│   ├── app.json                    # Expo configuration
+│   ├── app.json                    # Expo SDK 57 configuration
 │   ├── package.json                # Mobile dependencies & scripts
 │   └── tsconfig.json               # TypeScript configuration extending Expo base
-└── admin/                          # Standalone Admin Website (React + Vite + TypeScript)
-    ├── public/                     # Static assets
-    ├── src/
-    │   ├── __tests__/              # Unit tests
-    │   │   └── foundation.test.ts  # Design tokens and navigation integrity test
-    │   ├── components/
-    │   │   ├── NoticeBanner.tsx    # Phase 1 preview banner
-    │   │   ├── Sidebar.tsx         # Deep navy navigation sidebar
-    │   │   └── Topbar.tsx          # Status bar and preview operator profile
-    │   ├── pages/
-    │   │   ├── BookingsPage.tsx    # Sample bookings schedule shell
-    │   │   ├── CoachVerificationPage.tsx # Simulated accreditation queue shell
-    │   │   ├── FinancePage.tsx     # Simulated GMV and payouts shell
-    │   │   ├── OverviewPage.tsx    # Dashboard with sample KPI metrics & recent applications
-    │   │   └── UsersPage.tsx       # Platform user breakdown shell
-    │   ├── theme/
-    │   │   └── tokens.ts           # Design tokens matching locked visual palette
-    │   ├── App.tsx                 # Main layout shell with tab switching
-    │   ├── index.css               # Clean vanilla CSS design system
-    │   └── main.tsx                # React 19 root mount
-    ├── index.html                  # HTML entry point with Inter font & SEO meta tags
-    ├── package.json                # Admin dependencies & scripts
+├── admin/                          # Standalone Admin Website (React + Vite + TypeScript)
+│   ├── public/                     # Static assets & favicons
+│   ├── src/
+│   │   ├── __tests__/              # Unit test suite
+│   │   ├── components/             # NoticeBanner, Sidebar, Topbar
+│   │   ├── pages/                  # Overview, CoachVerification, Users, Bookings, Finance
+│   │   ├── theme/                  # Design tokens matching locked visual palette
+│   │   ├── App.tsx                 # Main layout shell with reactive tab navigation
+│   │   ├── index.css               # Clean vanilla CSS design system
+│   │   └── main.tsx                # React 19 root mount
+│   ├── index.html                  # HTML entry point with Inter font & SEO meta tags
+│   ├── package.json                # Admin dependencies & scripts
+│   ├── tsconfig.json               # TypeScript configuration
+│   └── vite.config.ts              # Vite configuration
+└── server/                         # Backend API Foundation (Node.js, Express, TypeScript, MongoDB)
+    ├── .env.example                # Template with placeholder configuration
+    ├── .gitignore                  # Server-specific ignore rules
+    ├── README.md                   # Dedicated backend setup & operational guide
+    ├── package.json                # Server dependencies & scripts
     ├── tsconfig.json               # TypeScript configuration
-    └── vite.config.ts              # Vite configuration
+    ├── src/
+    │   ├── config/                 # env.ts (validation) and db.ts (Mongoose lifecycle)
+    │   ├── middleware/             # notFound.ts (404) and errorHandler.ts (error masking)
+    │   ├── routes/                 # health.ts (GET /api/health)
+    │   ├── app.ts                  # Express application factory and middleware setup
+    │   ├── server.ts               # HTTP listener and graceful shutdown handling
+    │   └── index.ts                # Server startup entry point
+    └── tests/                      # Vitest + Supertest integration & unit test suite
 ```
 
 ---
@@ -87,8 +79,9 @@ AthleteConnect/
 ## 3. Technology Choices & Styling Rationale
 
 - **Expo & React Native (Mobile)**: Built with official, stable Expo SDK 57 (`~57.0.30`) and React Native `0.86.3` (aligned for full compatibility with the current Play Store Expo Go app).
-- **Styling Architecture Assessment**: React Native `StyleSheet` with centralized design tokens was selected over NativeWind. NativeWind v4 requires experimental PostCSS and Metro babel plugins that are prone to version conflicts and Windows-specific path issues. React Native `StyleSheet` with centralized tokens (`colors.ts`, `spacing.ts`, etc.) provides 100% stability, zero build friction, full type safety, and is effortless for a beginner to maintain without destabilizing the project.
+- **Styling Architecture Assessment**: React Native `StyleSheet` with centralized design tokens was selected over NativeWind. React Native `StyleSheet` with centralized tokens provides 100% stability, zero build friction, full type safety, and is effortless for a beginner to maintain without destabilizing the project.
 - **Vite & React (Admin)**: Standalone React + Vite + TypeScript app running completely decoupled from the mobile client. Uses vanilla CSS custom properties to implement the locked visual design tokens cleanly with zero third-party framework overhead.
+- **Node.js & Express (Server)**: Clean, decoupled TypeScript API foundation with Mongoose for MongoDB, environment validation, explicit CORS, and production error masking.
 - **Icons**: Lucide (`lucide-react-native` and `lucide-react`) across both platforms for a unified visual design language.
 
 ---
@@ -101,87 +94,65 @@ All commands should be executed from the project root (`c:\Users\samar\OneDrive\
 
 From the project root:
 ```powershell
-# Run all checks across both mobile and admin
+# Run all checks across mobile, admin, and server
 npm run check:all
 
 # Or run checks individually:
 npm run typecheck:mobile   # Type checks mobile app with tsc --noEmit
 npm run typecheck:admin    # Type checks admin website with tsc -b --noEmit
+npm run typecheck:server   # Type checks server with tsc --noEmit
 npm run lint:admin         # Runs oxlint on admin code
-npm run test:admin         # Runs Vitest unit test suite
+npm run test:admin         # Runs Vitest unit test suite for admin
+npm run test:server        # Runs Vitest integration & unit tests for server
 ```
 
-### B. Launch the Admin Website
+### B. Launch the Backend Server
+
+From the project root:
+```powershell
+# 1. (First-time) Copy environment template:
+Copy-Item server/.env.example server/.env
+
+# 2. Start server in development mode with hot-reloading:
+npm run dev:server
+```
+The server will start on port `5000` (or `PORT` specified in `.env`):
+- Health check: **`http://localhost:5000/api/health`**
+
+To compile and run the production build:
+```powershell
+npm run build:server
+npm run start:server
+```
+
+### C. Launch the Admin Website
 
 To start the Vite development server:
 ```powershell
 npm run dev:admin
 ```
-Then open your web browser to:
-```
-http://localhost:5173
-```
+Then open your web browser to: **`http://localhost:5173`**
 
 To build the production bundle for admin:
 ```powershell
 npm run build:admin
 ```
 
-### C. Launch the Mobile Application
+### D. Launch the Mobile Application
 
 To start the Expo development server:
 ```powershell
 npm run start:mobile
 ```
-This will launch the Expo CLI interactive terminal:
-- Press **`w`** to open in the web browser (requires `@expo/metro-runtime` which Expo prompts to install if requested).
+- Press **`w`** in the terminal to view in a web browser.
 - Press **`a`** to open in an Android Emulator.
-- Scan the displayed QR code with the **Expo Go** app on your physical iOS or Android mobile device.
-
-Alternatively, launch platform targets directly:
-```powershell
-npm run mobile:android   # Launch directly targeting Android emulator/device
-npm run mobile:ios       # Launch directly targeting iOS simulator (macOS only)
-```
+- Scan the terminal QR code using the **Expo Go** mobile app on your iOS or Android device.
 
 ---
 
-## 5. How to Test the Role-Selection Flow (Mobile App)
+## 5. Security & Operational Boundary
 
-1. Launch the mobile app (`npm run start:mobile`).
-2. On initial load, you will be greeted by the **Role Selection Screen**:
-   - AthleteConnect branding and logo badge.
-   - Welcome headline and subtitle.
-   - Three selectable role cards:
-     1. **Parent / Guardian**: *"Find trusted coaches for your child, manage their training, and track their progress."*
-     2. **Individual Customer**: *"Discover coaches and build your skills at your own pace."*
-     3. **Player / Coach**: *"Explore coaching opportunities and manage your coaching profile."*
-3. **Select any role**: Tapping a card highlights it with a navy border, checked indicator, and subtle background accent. The floating **Continue button** updates dynamically to display the selected role title.
-4. **Tap Continue**: The app smoothly navigates to the **Role Preview Screen** (`RolePreview`):
-   - Clearly displays the active role and planned features.
-   - Displays the **Sports Discovery (Sample Preview)** with demo categories: **Boxing**, **Wushu**, and **Kickboxing**.
-   - Displays sample coach listing stubs with ratings and demo rates.
-5. **Tap "Change Role" or "Return to Role Selection"**: You are returned to the initial screen to test another selection.
-
----
-
-## 6. How to Test the Admin Dashboard Shell
-
-1. Launch the admin dashboard (`npm run dev:admin`) and open `http://localhost:5173`.
-2. Inspect the **Deep Navy Sidebar** and **AthleteConnect** header.
-3. Observe the prominent **Phase 1 Foundation Preview** notice banner at the top of every view.
-4. Click through each sidebar navigation tab:
-   - **Overview**: Displays 4 demo KPI metric cards (Sample Athletes, Sample Coaches, Completed Sessions, Platform Volume), the Coach Verification Queue sample table, and Initial Sports preview.
-   - **Coach Verification**: Review the simulated coach accreditation queue, document check indicators, and Phase 2 stub notice.
-   - **Users**: View the distribution of accounts across Parents, Individual Customers, and Coaches.
-   - **Bookings**: Inspect the scheduled sessions demo table.
-   - **Finance**: View simulated gross booking volume, coach payout share, and platform commission breakdown.
-
----
-
-## 7. Current Limitations & Phase 1 Boundary
-
-- **No Backend**: No database, server, REST/GraphQL API, or webhooks are present. All metrics and listings are static demonstration fixtures.
-- **No Authentication**: Login, signup, password hashing, and session management are not implemented. The Admin dashboard is a development preview shell and must not be exposed to the public internet until server-side authentication and role-based access control (RBAC) are added in Phase 2.
-- **No Data Persistence**: Role selections and navigation actions are in-memory client state. No personal data is requested or stored.
-- **No Live Payments**: Financial metrics and coach rates are strictly demonstration stubs. No payment gateways (Stripe, PayPal, etc.) or banking details are configured.
+- **Decoupled Apps**: The mobile app and admin website are not yet connected to the backend server in Phase 2A.
+- **No Mock Auth / Admin Accounts**: There are no public admin registration routes, unauthenticated admin endpoints, or fake database seeding.
+- **No Hardcoded Secrets**: Production requires explicit configuration in `.env`. Wildcard CORS `*` is rejected in production.
+- **Graceful Shutdown**: Traps `SIGTERM` and `SIGINT` to cleanly close open HTTP connections and terminate the Mongoose connection before process exit.
