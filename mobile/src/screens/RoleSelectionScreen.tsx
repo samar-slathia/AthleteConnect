@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowRight } from 'lucide-react-native';
 import { Header } from '../components/Header';
@@ -20,6 +20,10 @@ export const RoleSelectionScreen: React.FC<RoleSelectionScreenProps> = ({ naviga
     if (selectedRole) {
       navigation.navigate('RolePreview', { roleId: selectedRole });
     }
+  };
+
+  const handleSignIn = () => {
+    navigation.navigate('Login');
   };
 
   return (
@@ -52,6 +56,19 @@ export const RoleSelectionScreen: React.FC<RoleSelectionScreenProps> = ({ naviga
               onSelect={setSelectedRole}
             />
           ))}
+        </View>
+
+        {/* Sign In Entry Point */}
+        <View style={styles.signInRow}>
+          <Text style={styles.signInPromptText}>Already have an account?</Text>
+          <TouchableOpacity
+            onPress={handleSignIn}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in to existing account"
+            style={styles.signInTouchable}
+          >
+            <Text style={styles.signInLinkText}>Sign In</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Phase 1 Notice Banner */}
@@ -94,6 +111,27 @@ const styles = StyleSheet.create({
   },
   rolesContainer: {
     marginVertical: 2,
+  },
+  signInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: SPACING.md,
+    gap: 6,
+  },
+  signInPromptText: {
+    ...TYPOGRAPHY.body,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  signInTouchable: {
+    paddingVertical: SPACING.xs,
+  },
+  signInLinkText: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 14,
+    color: COLORS.navy,
+    textDecorationLine: 'underline',
   },
   bottomBar: {
     position: 'absolute',

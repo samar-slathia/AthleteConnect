@@ -29,6 +29,31 @@ export const ActivityIndicator = createMockComponent('ActivityIndicator');
 export const KeyboardAvoidingView = createMockComponent('KeyboardAvoidingView');
 export const SafeAreaView = createMockComponent('SafeAreaView');
 
+export const Animated = {
+  Value: class {
+    value: number;
+    constructor(v: number) {
+      this.value = v;
+    }
+    setValue(v: number) {
+      this.value = v;
+    }
+  },
+  timing: () => ({
+    start: (cb?: any) => cb && cb({ finished: true }),
+    stop: () => {},
+  }),
+  parallel: () => ({
+    start: (cb?: any) => cb && cb({ finished: true }),
+    stop: () => {},
+  }),
+  View: createMockComponent('Animated.View'),
+};
+
+export const AccessibilityInfo = {
+  isReduceMotionEnabled: () => Promise.resolve(false),
+};
+
 export default {
   Platform,
   StyleSheet,
@@ -40,4 +65,6 @@ export default {
   ActivityIndicator,
   KeyboardAvoidingView,
   SafeAreaView,
+  Animated,
+  AccessibilityInfo,
 };

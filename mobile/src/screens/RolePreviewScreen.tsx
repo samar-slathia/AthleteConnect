@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, CheckCircle2, Compass, Star } from 'lucide-react-native';
+import { ArrowLeft, ArrowRight, CheckCircle2, Compass, Star } from 'lucide-react-native';
 import { ROLES } from '../data/roles';
 import { SAMPLE_SPORTS } from '../data/sports';
 import { Badge } from '../components/Badge';
@@ -113,13 +113,29 @@ export const RolePreviewScreen: React.FC<RolePreviewScreenProps> = ({ route, nav
           ))}
         </View>
 
-        <View style={styles.footerAction}>
+        {/* Primary and Secondary Navigation Actions */}
+        <View style={styles.actionsContainer}>
           <Button
-            title="Return to Role Selection"
-            variant="outline"
-            onPress={() => navigation.goBack()}
-            icon={<ArrowLeft size={16} color={COLORS.navy} />}
+            title={`Create ${role.title} Account`}
+            variant="primary"
+            onPress={() => navigation.navigate('Register', { initialRole: role.id })}
+            icon={<ArrowRight size={18} color={COLORS.navy} />}
           />
+          <Button
+            title="Already have an account? Sign In"
+            variant="outline"
+            onPress={() => navigation.navigate('Login')}
+            style={styles.secondaryButton}
+          />
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.returnRow}
+            accessibilityRole="button"
+            accessibilityLabel="Change selected role"
+          >
+            <ArrowLeft size={16} color={COLORS.navyMuted} />
+            <Text style={styles.returnText}>Change Role Selection</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -319,7 +335,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.success,
   },
-  footerAction: {
+  actionsContainer: {
     marginTop: SPACING.xl,
+    gap: SPACING.md,
+  },
+  secondaryButton: {
+    marginTop: 2,
+  },
+  returnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.sm,
+    gap: 6,
+  },
+  returnText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.navyMuted,
   },
 });

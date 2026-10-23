@@ -27,6 +27,13 @@ export const LogOut = createMockIcon('LogOut');
 export const CheckCircle2 = createMockIcon('CheckCircle2');
 export const Compass = createMockIcon('Compass');
 export const Star = createMockIcon('Star');
+export const ArrowRight = createMockIcon('ArrowRight');
+export const Sparkles = createMockIcon('Sparkles');
+export const Home = createMockIcon('Home');
+export const Target = createMockIcon('Target');
+export const Users = createMockIcon('Users');
+export const Award = createMockIcon('Award');
+export const Check = createMockIcon('Check');
 
 export default new Proxy(
   {},

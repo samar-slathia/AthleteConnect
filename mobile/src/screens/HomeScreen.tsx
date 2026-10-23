@@ -4,11 +4,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LogOut, ShieldCheck, User as UserIcon, Mail, CheckCircle2, Zap } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../data/roles';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
-export const HomeScreen: React.FC = () => {
+export type HomeScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
+
+export interface HomeScreenProps {
+  navigation?: HomeScreenNavProps['navigation'];
+  route?: HomeScreenNavProps['route'];
+}
+
+export const HomeScreen: React.FC<HomeScreenProps> = () => {
   const insets = useSafeAreaInsets();
   const { user, logout, isLoading } = useAuth();
 

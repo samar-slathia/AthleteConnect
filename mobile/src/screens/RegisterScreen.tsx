@@ -17,10 +17,17 @@ import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
+
+export type RegisterScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Register'>;
+
 export interface RegisterScreenProps {
-  initialRole: RoleId;
+  initialRole?: RoleId;
   onNavigateToLogin?: () => void;
   onBack?: () => void;
+  navigation?: RegisterScreenNavProps['navigation'];
+  route?: RegisterScreenNavProps['route'];
 }
 
 const ALLOWED_CUSTOMER_ROLES: RoleId[] = ['parent', 'individual', 'coach'];
@@ -29,6 +36,8 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   initialRole,
   onNavigateToLogin,
   onBack,
+  navigation,
+  route,
 }) => {
   const insets = useSafeAreaInsets();
   const { register, isLoading: authLoading, error: authError, clearError } = useAuth();
@@ -40,9 +49,31 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const [clientError, setClientError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Resolve role from direct prop (unit tests) or route params (navigation stack)
+  const effectiveRole: RoleId = initialRole ?? route?.params?.initialRole ?? 'parent';
+
   // Validate customer role restriction
-  const isAllowedRole = ALLOWED_CUSTOMER_ROLES.includes(initialRole);
-  const roleInfo = ROLES.find((r) => r.id === initialRole);
+  const isAllowedRole = ALLOWED_CUSTOMER_ROLES.includes(effectiveRole);
+  const roleInfo = ROLES.find((r) => r.id === effectiveRole);
+
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else if (navigation?.canGoBack()) {
+      navigation.goBack();
+    }
+  };
+
+  const handleLoginRedirect = () => {
+    if (onNavigateToLogin) {
+      onNavigateToLogin();
+    } else if (navigation) {
+      navigation.navigate('Login');
+    }
+  };
+
+  const showBackButton = Boolean(onBack || navigation?.canGoBack?.());
+  const showLoginLink = Boolean(onNavigateToLogin || navigation);
 
   const validateForm = (): string | null => {
     if (!isAllowedRole) {
@@ -95,7 +126,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
 
     setIsSubmitting(true);
     try {
-      await register(name.trim(), email.trim().toLowerCase(), password, initialRole);
+      await register(name.trim(), email.trim().toLowerCase(), password, effectiveRole);
     } catch {
       // Error message is stored in AuthContext and displayed safely
     } finally {
@@ -112,9 +143,9 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
     >
       {/* Top Header Bar */}
       <View style={styles.topBar}>
-        {onBack ? (
+        {showBackButton ? (
           <TouchableOpacity
-            onPress={onBack}
+            onPress={handleBack}
             style={styles.backButton}
             accessibilityRole="button"
             accessibilityLabel="Go back"
@@ -256,11 +287,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
           />
 
           {/* Navigation to Login */}
-          {onNavigateToLogin ? (
+          {showLoginLink ? (
             <View style={styles.loginRedirectRow}>
               <Text style={styles.loginPromptText}>Already have an account?</Text>
               <TouchableOpacity
-                onPress={onNavigateToLogin}
+                onPress={handleLoginRedirect}
                 accessibilityRole="button"
                 accessibilityLabel="Sign in to existing account"
                 disabled={isSubmitting || authLoading}

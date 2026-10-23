@@ -5,6 +5,9 @@ export type RootStackParamList = {
   Welcome: undefined;
   RoleSelection: undefined;
   RolePreview: { roleId: RoleId };
+  Register: { initialRole: RoleId };
+  Login: undefined;
+  Home: undefined;
 };
 
 export type WelcomeScreenProps = NativeStackScreenProps<
@@ -20,4 +23,19 @@ export type RoleSelectionScreenProps = NativeStackScreenProps<
 export type RolePreviewScreenProps = NativeStackScreenProps<
   RootStackParamList,
   'RolePreview'
+>;
+
+export type RegisterScreenNavProps = NativeStackScreenProps<
+  RootStackParamList,
+  'Register'
+>;
+
+export type LoginScreenNavProps = NativeStackScreenProps<
+  RootStackParamList,
+  'Login'
+>;
+
+export type HomeScreenNavProps = NativeStackScreenProps<
+  RootStackParamList,
+  'Home'
 >;

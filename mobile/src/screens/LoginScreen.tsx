@@ -12,17 +12,24 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, AlertCircle, Eye, EyeOff, Mail, Lock, Zap } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
 import { Button } from '../components/Button';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
+
+export type LoginScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
 export interface LoginScreenProps {
   onNavigateToRegister?: () => void;
   onBack?: () => void;
+  navigation?: LoginScreenNavProps['navigation'];
+  route?: LoginScreenNavProps['route'];
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onNavigateToRegister,
   onBack,
+  navigation,
 }) => {
   const insets = useSafeAreaInsets();
   const { login, isLoading: authLoading, error: authError, clearError } = useAuth();
@@ -32,6 +39,25 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else if (navigation?.canGoBack()) {
+      navigation.goBack();
+    }
+  };
+
+  const handleRegisterRedirect = () => {
+    if (onNavigateToRegister) {
+      onNavigateToRegister();
+    } else if (navigation) {
+      navigation.navigate('RoleSelection');
+    }
+  };
+
+  const showBackButton = Boolean(onBack || navigation?.canGoBack?.());
+  const showRegisterLink = Boolean(onNavigateToRegister || navigation);
 
   const validateForm = (): string | null => {
     const trimmedEmail = email.trim();
@@ -83,9 +109,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     >
       {/* Top Header Bar */}
       <View style={styles.topBar}>
-        {onBack ? (
+        {showBackButton ? (
           <TouchableOpacity
-            onPress={onBack}
+            onPress={handleBack}
             style={styles.backButton}
             accessibilityRole="button"
             accessibilityLabel="Go back"
@@ -202,11 +228,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           />
 
           {/* Navigation to Register */}
-          {onNavigateToRegister ? (
+          {showRegisterLink ? (
             <View style={styles.registerRedirectRow}>
               <Text style={styles.registerPromptText}>Don't have an account?</Text>
               <TouchableOpacity
-                onPress={onNavigateToRegister}
+                onPress={handleRegisterRedirect}
                 accessibilityRole="button"
                 accessibilityLabel="Create a new account"
                 disabled={isSubmitting || authLoading}
