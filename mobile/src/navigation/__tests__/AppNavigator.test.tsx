@@ -18,6 +18,7 @@ function renderWithAuth(ui: React.ReactElement, authValue: Partial<AuthContextTy
     user: null,
     token: null,
     isLoading: false,
+    isInitializing: false,
     error: null,
     login: vi.fn().mockResolvedValue(undefined),
     register: vi.fn().mockResolvedValue(undefined),
@@ -137,9 +138,9 @@ describe('AppNavigator - Session Initialization', () => {
     vi.restoreAllMocks();
   });
 
-  it('displays branded loading screen while saved token is being validated (isLoading = true)', () => {
+  it('displays branded loading screen while saved token is being validated (isInitializing = true)', () => {
     const { tree, cleanup } = renderWithAuth(React.createElement(AppNavigator), {
-      isLoading: true,
+      isInitializing: true,
       user: null,
     });
 
@@ -161,6 +162,28 @@ describe('AppNavigator - Session Initialization', () => {
     // Stack screens must NOT be mounted while session is initializing
     const screens = findAllElements(tree, (el) => el.type === 'NativeStackScreen');
     expect(screens).toHaveLength(0);
+
+    cleanup();
+  });
+
+  it('regression: does NOT unmount navigation stack when auth request is in flight (isLoading = true, isInitializing = false)', () => {
+    const { tree, cleanup } = renderWithAuth(React.createElement(AppNavigator), {
+      isLoading: true,
+      isInitializing: false,
+      user: null,
+    });
+
+    // Session loading screen must NOT be displayed
+    const loadingContainer = findElement(tree, (el) => el.props?.testID === 'session-loading');
+    expect(loadingContainer).toBeNull();
+
+    // Stack screens MUST remain mounted to preserve user screen position (e.g. on Login)
+    const screens = findAllElements(
+      tree,
+      (el) => el.type?.displayName === 'NativeStackScreen' || el.type === 'NativeStackScreen'
+    );
+    const screenNames = screens.map((s) => s.props.name);
+    expect(screenNames).toEqual(['Welcome', 'RoleSelection', 'RolePreview', 'Register', 'Login']);
 
     cleanup();
   });

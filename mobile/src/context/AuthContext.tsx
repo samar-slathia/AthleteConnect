@@ -15,6 +15,7 @@ export interface AuthContextType {
   user: UserProfile | null;
   token: string | null;
   isLoading: boolean;
+  isInitializing: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, role: CustomerRole) => Promise<void>;
@@ -31,7 +32,8 @@ export interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   // Guards against concurrent authentication requests and unmounted state updates
@@ -49,6 +51,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setUser(null);
             setToken(null);
             setIsLoading(false);
+            setIsInitializing(false);
           }
           return;
         }
@@ -102,6 +105,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } finally {
         if (isMountedRef.current) {
           setIsLoading(false);
+          setIsInitializing(false);
         }
       }
     }
@@ -232,6 +236,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     token,
     isLoading,
+    isInitializing,
     error,
     login,
     register,

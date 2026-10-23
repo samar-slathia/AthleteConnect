@@ -15,10 +15,10 @@ import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const AppNavigator: React.FC = () => {
-  const { user, isLoading } = useAuth();
+  const { user, isInitializing } = useAuth();
 
   // Session initialization state: display branded loading indicator while validating stored token
-  if (isLoading) {
+  if (isInitializing) {
     return (
       <View
         style={styles.loadingContainer}

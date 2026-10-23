@@ -114,8 +114,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = () => {
             <Text style={styles.noticeTitle}>Session Active</Text>
           </View>
           <Text style={styles.noticeDescription}>
-            Your identity has been authenticated against the AthleteConnect backend. Full role-based
-            dashboards and navigation will be connected in Phase 2C.3.
+            Your identity has been verified successfully. You're signed in to AthleteConnect. Your
+            personalized coaching experience is coming together. More features will become
+            available as AthleteConnect develops.
           </Text>
         </View>
 

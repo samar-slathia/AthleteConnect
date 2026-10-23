@@ -13,6 +13,7 @@ function renderWithAuth(ui: React.ReactElement, authValue: Partial<AuthContextTy
     user: null,
     token: null,
     isLoading: false,
+    isInitializing: false,
     error: null,
     login: vi.fn().mockResolvedValue(undefined),
     register: vi.fn().mockResolvedValue(undefined),
@@ -205,6 +206,65 @@ describe('LoginScreen', () => {
       (el) => el.props?.children === 'Invalid email or password.'
     );
     expect(errorEl).toBeDefined();
+
+    cleanup();
+  });
+
+  it('regression: displays retryable error message on network failure (HTTP 0) and stops spinner', () => {
+    const { tree, cleanup } = renderWithAuth(React.createElement(LoginScreen, {}), {
+      error: 'Unable to connect to AthleteConnect servers. Please check your connection and try again.',
+      isLoading: false,
+    });
+
+    const errorEl = findElement(
+      tree,
+      (el) =>
+        el.props?.children ===
+        'Unable to connect to AthleteConnect servers. Please check your connection and try again.'
+    );
+    expect(errorEl).toBeDefined();
+
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Sign In');
+    expect(submitBtn.props.loading).toBe(false);
+    expect(submitBtn.props.disabled).toBe(false);
+
+    cleanup();
+  });
+
+  it('regression: displays error message on server error (HTTP 500) and keeps submit button retryable', () => {
+    const { tree, cleanup } = renderWithAuth(React.createElement(LoginScreen, {}), {
+      error: 'AthleteConnect service is currently unavailable. Please try again later.',
+      isLoading: false,
+    });
+
+    const errorEl = findElement(
+      tree,
+      (el) =>
+        el.props?.children ===
+        'AthleteConnect service is currently unavailable. Please try again later.'
+    );
+    expect(errorEl).toBeDefined();
+
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Sign In');
+    expect(submitBtn.props.loading).toBe(false);
+    expect(submitBtn.props.disabled).toBe(false);
+
+    cleanup();
+  });
+
+  it('regression: blocks duplicate submissions while login request is in flight', () => {
+    const loginMock = vi.fn().mockResolvedValue(undefined);
+    const { tree, cleanup } = renderWithAuth(React.createElement(LoginScreen, {}), {
+      login: loginMock,
+      isLoading: true,
+    });
+
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Sign In');
+    expect(submitBtn.props.loading).toBe(true);
+    expect(submitBtn.props.disabled).toBe(true);
+
+    submitBtn.props.onPress();
+    expect(loginMock).not.toHaveBeenCalled();
 
     cleanup();
   });
