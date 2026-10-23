@@ -20,6 +20,7 @@
     "typecheck:mobile": "npm --prefix mobile run typecheck",
     "typecheck:admin": "npm --prefix admin run typecheck",
     "typecheck": "npm run typecheck:admin && npm run typecheck:mobile && npm run typecheck:server",
-    "check:all": "npm run typecheck:admin && npm run typecheck:mobile && npm run typecheck:server && npm run lint:admin && npm run test:admin && npm run test:server"
+    "test:mobile": "npm --prefix mobile run test",
+    "check:all": "npm run typecheck:admin && npm run typecheck:mobile && npm run typecheck:server && npm run lint:admin && npm run test:admin && npm run test:server && npm run test:mobile"
   }
 }
