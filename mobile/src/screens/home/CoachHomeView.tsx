@@ -1,26 +1,35 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { Users, Sparkles } from 'lucide-react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Users, Sparkles, Edit3 } from 'lucide-react-native';
 import { UserProfile } from '../../services/authApi';
 import { OnboardingStepCard } from './components/OnboardingStepCard';
 import { EmptyStateSection } from './components/EmptyStateSection';
 import { Badge } from '../../components/Badge';
+import { Button } from '../../components/Button';
+import { CoachProfileEditScreen } from '../CoachProfileEditScreen';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 
 export interface CoachHomeViewProps {
   user: UserProfile;
+  initialEditing?: boolean;
 }
 
-export const CoachHomeView: React.FC<CoachHomeViewProps> = () => {
+export const CoachHomeView: React.FC<CoachHomeViewProps> = ({ initialEditing = false }) => {
+  const [isEditingProfile, setIsEditingProfile] = useState<boolean>(initialEditing);
+
+  if (isEditingProfile) {
+    return <CoachProfileEditScreen onBack={() => setIsEditingProfile(false)} />;
+  }
+
   return (
     <View style={styles.container}>
       {/* Introduction */}
       <View style={styles.introHeader}>
         <Text style={styles.introTitle}>Coach Studio</Text>
         <Text style={styles.introText}>
-          Welcome to your coaching workstation. AthleteConnect coaching and scheduling tools are
-          currently in development. Review the setup roadmap below to see what features are
-          coming.
+          Welcome to your coaching workstation. You can now edit and save your coaching profile
+          details and hourly rates, while credential submission and scheduling features remain in
+          development.
         </Text>
       </View>
 
@@ -36,9 +45,17 @@ export const CoachHomeView: React.FC<CoachHomeViewProps> = () => {
           </View>
         </View>
         <Text style={styles.statusText}>
-          Coaching profiles, credentials submission, rate configuration, and scheduling tools are
-          actively being built. Below is the upcoming setup roadmap for coach onboarding.
+          Coaching profile editing and rate configuration are now live. Credential submission
+          and scheduling tools remain in development.
         </Text>
+        <View style={styles.editorActionWrap}>
+          <Button
+            title="Edit Coach Profile"
+            variant="primary"
+            onPress={() => setIsEditingProfile(true)}
+            icon={<Edit3 size={16} color={COLORS.navy} />}
+          />
+        </View>
       </View>
 
       {/* Upcoming Setup Roadmap */}
@@ -46,12 +63,20 @@ export const CoachHomeView: React.FC<CoachHomeViewProps> = () => {
         <Text style={styles.sectionHeader}>UPCOMING SETUP ROADMAP</Text>
       </View>
 
-      <OnboardingStepCard
-        stepNumber={1}
-        title="Profile Details & Coaching Bio"
-        description="Share your martial arts background, competitive experience, and coaching philosophy."
-        statusLabel="In Development"
-      />
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setIsEditingProfile(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Edit Profile Details and Coaching Bio"
+      >
+        <OnboardingStepCard
+          stepNumber={1}
+          title="Profile Details & Coaching Bio"
+          description="Share your martial arts background, competitive experience, and coaching philosophy."
+          statusLabel="Available"
+        />
+      </TouchableOpacity>
+
 
       <OnboardingStepCard
         stepNumber={2}
@@ -145,6 +170,10 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 17,
     color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+  },
+  editorActionWrap: {
+    marginTop: SPACING.xs,
   },
   sectionHeaderRow: {
     marginTop: SPACING.md,
