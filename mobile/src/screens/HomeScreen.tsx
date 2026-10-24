@@ -1,13 +1,16 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, ShieldCheck, User as UserIcon, Mail, CheckCircle2, Zap } from 'lucide-react-native';
+import { LogOut, ShieldCheck, User as UserIcon, Mail, Zap } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../data/roles';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
+import { ParentHomeView } from './home/ParentHomeView';
+import { IndividualHomeView } from './home/IndividualHomeView';
+import { CoachHomeView } from './home/CoachHomeView';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
 export type HomeScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -65,15 +68,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = () => {
           <Text style={styles.greetingName}>{user.name}</Text>
         </View>
 
-        {/* Verified User Profile Card */}
+        {/* Your Account Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardTitleGroup}>
-              <ShieldCheck size={18} color={COLORS.navy} />
-              <Text style={styles.cardSectionTitle}>Verified Profile</Text>
+              <UserIcon size={18} color={COLORS.navy} />
+              <Text style={styles.cardSectionTitle}>Your Account</Text>
             </View>
             <View style={styles.statusIndicator}>
-              <View style={[styles.statusDot, user.isActive ? styles.statusDotActive : styles.statusDotInactive]} />
+              <View
+                style={[
+                  styles.statusDot,
+                  user.isActive ? styles.statusDotActive : styles.statusDotInactive,
+                ]}
+              />
               <Text style={styles.statusText}>{user.isActive ? 'Active' : 'Inactive'}</Text>
             </View>
           </View>
@@ -107,18 +115,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = () => {
           </View>
         </View>
 
-        {/* Phase Info Box */}
-        <View style={styles.noticeCard}>
-          <View style={styles.noticeHeader}>
-            <CheckCircle2 size={16} color={COLORS.success} />
-            <Text style={styles.noticeTitle}>Session Active</Text>
-          </View>
-          <Text style={styles.noticeDescription}>
-            Your identity has been verified successfully. You're signed in to AthleteConnect. Your
-            personalized coaching experience is coming together. More features will become
-            available as AthleteConnect develops.
-          </Text>
-        </View>
+        {/* Role-Specific Experience */}
+        {user.role === 'parent' ? (
+          <ParentHomeView user={user} />
+        ) : user.role === 'individual' ? (
+          <IndividualHomeView user={user} />
+        ) : user.role === 'coach' ? (
+          <CoachHomeView user={user} />
+        ) : null}
 
         {/* Sign Out Action */}
         <View style={styles.actionsContainer}>
@@ -277,31 +281,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.sm,
     marginTop: 2,
-  },
-  noticeCard: {
-    backgroundColor: COLORS.successLight,
-    borderColor: 'rgba(22, 128, 93, 0.2)',
-    borderWidth: 1,
-    borderRadius: RADII.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.xl,
-  },
-  noticeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  noticeTitle: {
-    ...TYPOGRAPHY.bodyBold,
-    fontSize: 13,
-    color: COLORS.success,
-  },
-  noticeDescription: {
-    ...TYPOGRAPHY.body,
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#135E44',
   },
   actionsContainer: {
     marginTop: SPACING.sm,
