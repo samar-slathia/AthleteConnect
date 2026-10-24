@@ -68,4 +68,5 @@ export const API_ENDPOINTS = {
   REGISTER: '/api/auth/register',
   LOGIN: '/api/auth/login',
   ME: '/api/auth/me',
+  COACH_PROFILE: '/api/coach/profile/me',
 } as const;
