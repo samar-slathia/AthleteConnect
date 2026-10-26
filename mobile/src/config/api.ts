@@ -69,4 +69,5 @@ export const API_ENDPOINTS = {
   LOGIN: '/api/auth/login',
   ME: '/api/auth/me',
   COACH_PROFILE: '/api/coach/profile/me',
+  COACH_AVAILABILITY: '/api/coach/availability/me',
 } as const;
