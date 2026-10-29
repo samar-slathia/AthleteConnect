@@ -28,6 +28,12 @@ export const ScrollView = createMockComponent('ScrollView');
 export const ActivityIndicator = createMockComponent('ActivityIndicator');
 export const KeyboardAvoidingView = createMockComponent('KeyboardAvoidingView');
 export const SafeAreaView = createMockComponent('SafeAreaView');
+export const Modal = createMockComponent('Modal');
+
+export const Linking = {
+  canOpenURL: (_url: string): Promise<boolean> => Promise.resolve(true),
+  openURL: (_url: string): Promise<void> => Promise.resolve(),
+};
 
 export const Animated = {
   Value: class {
@@ -65,6 +71,8 @@ export default {
   ActivityIndicator,
   KeyboardAvoidingView,
   SafeAreaView,
+  Modal,
+  Linking,
   Animated,
   AccessibilityInfo,
 };

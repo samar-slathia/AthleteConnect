@@ -18,6 +18,7 @@ interface ButtonProps {
   style?: ViewStyle;
   textStyle?: TextStyle;
   icon?: React.ReactNode;
+  testID?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -29,6 +30,7 @@ export const Button: React.FC<ButtonProps> = ({
   style,
   textStyle,
   icon,
+  testID,
 }) => {
   const getContainerStyle = () => {
     if (disabled) {
@@ -68,6 +70,7 @@ export const Button: React.FC<ButtonProps> = ({
       style={[styles.baseButton, getContainerStyle(), style]}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading }}
+      testID={testID}
     >
       {loading ? (
         <ActivityIndicator color={variant === 'primary' ? COLORS.navy : COLORS.textPrimary} />

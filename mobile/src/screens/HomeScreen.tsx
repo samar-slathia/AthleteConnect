@@ -1,16 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LogOut, ShieldCheck, User as UserIcon, Mail, Zap } from 'lucide-react-native';
+import { Zap } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ROLES } from '../data/roles';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
+import { BottomNavBar } from '../navigation/BottomNavBar';
 import { ParentHomeView } from './home/ParentHomeView';
 import { IndividualHomeView } from './home/IndividualHomeView';
 import { CoachHomeView } from './home/CoachHomeView';
+import { CoachAvailabilityScreen } from './CoachAvailabilityScreen';
+import { UserProfileView } from './profile/UserProfileView';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
 export type HomeScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -18,21 +20,15 @@ export type HomeScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Hom
 export interface HomeScreenProps {
   navigation?: HomeScreenNavProps['navigation'];
   route?: HomeScreenNavProps['route'];
+  initialTab?: string;
 }
 
-export const HomeScreen: React.FC<HomeScreenProps> = () => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => {
   const insets = useSafeAreaInsets();
   const { user, logout, isLoading } = useAuth();
 
-  const roleInfo = ROLES.find((r) => r.id === user?.role);
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // In-memory state is cleared safely regardless
-    }
-  };
+  const startTab = route?.params?.initialTab || initialTab || 'home';
+  const [activeTab, setActiveTab] = useState<string>(startTab);
 
   if (!user) {
     return (
@@ -41,6 +37,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = () => {
       </View>
     );
   }
+
+  const roleInfo = ROLES.find((r) => r.id === user.role);
+
+  const coachTabs = ['home', 'sessions', 'availability', 'profile'];
+  const customerTabs = ['home', 'discover', 'bookings', 'profile'];
+  const validTabs = user.role === 'coach' ? coachTabs : customerTabs;
+  const currentTab = validTabs.includes(activeTab) ? activeTab : 'home';
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // In-memory state is cleared safely regardless
+    }
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -52,90 +63,113 @@ export const HomeScreen: React.FC<HomeScreenProps> = () => {
           </View>
           <Text style={styles.brandName}>AthleteConnect</Text>
         </View>
-        <Badge label="Authenticated" variant="success" />
+        <Badge
+          label={
+            currentTab === 'profile'
+              ? 'Profile'
+              : currentTab === 'discover'
+              ? 'Discover'
+              : currentTab === 'bookings'
+              ? 'Bookings'
+              : currentTab === 'sessions'
+              ? 'Sessions'
+              : currentTab === 'availability'
+              ? 'Availability'
+              : roleInfo
+              ? roleInfo.title
+              : 'Authenticated'
+          }
+          variant="lime"
+        />
       </View>
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: insets.bottom + SPACING.xxl },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Welcome Greeting Header */}
-        <View style={styles.greetingHeader}>
-          <Text style={styles.greetingSubtitle}>Welcome back,</Text>
-          <Text style={styles.greetingName}>{user.name}</Text>
-        </View>
+      {/* Main Tab Content Area */}
+      <View style={styles.contentArea}>
+        {currentTab === 'home' ? (
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 72 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Welcome Greeting Header */}
+            <View style={styles.greetingHeader}>
+              <Text style={styles.greetingSubtitle}>Welcome back,</Text>
+              <Text style={styles.greetingName}>{user.name}</Text>
+            </View>
 
-        {/* Your Account Profile Card */}
-        <View style={styles.profileCard}>
-          <View style={styles.cardHeaderRow}>
-            <View style={styles.cardTitleGroup}>
-              <UserIcon size={18} color={COLORS.navy} />
-              <Text style={styles.cardSectionTitle}>Your Account</Text>
-            </View>
-            <View style={styles.statusIndicator}>
-              <View
-                style={[
-                  styles.statusDot,
-                  user.isActive ? styles.statusDotActive : styles.statusDotInactive,
-                ]}
-              />
-              <Text style={styles.statusText}>{user.isActive ? 'Active' : 'Inactive'}</Text>
-            </View>
+            {/* Role-Specific Home Experience */}
+            {user.role === 'parent' ? (
+              <ParentHomeView user={user} mode="home" />
+            ) : user.role === 'individual' ? (
+              <IndividualHomeView user={user} mode="home" />
+            ) : user.role === 'coach' ? (
+              <CoachHomeView user={user} mode="home" onNavigateToTab={setActiveTab} />
+            ) : null}
+          </ScrollView>
+        ) : currentTab === 'discover' ? (
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 72 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {user.role === 'parent' ? (
+              <ParentHomeView user={user} mode="discover" />
+            ) : user.role === 'individual' ? (
+              <IndividualHomeView user={user} mode="discover" />
+            ) : null}
+          </ScrollView>
+        ) : currentTab === 'bookings' ? (
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 72 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {user.role === 'parent' ? (
+              <ParentHomeView user={user} mode="bookings" />
+            ) : user.role === 'individual' ? (
+              <IndividualHomeView user={user} mode="bookings" />
+            ) : null}
+          </ScrollView>
+        ) : currentTab === 'sessions' ? (
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 72 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {user.role === 'coach' ? (
+              <CoachHomeView user={user} mode="sessions" onNavigateToTab={setActiveTab} />
+            ) : null}
+          </ScrollView>
+        ) : currentTab === 'availability' ? (
+          <View
+            style={[styles.fullScreenTab, { paddingBottom: insets.bottom + 64 }]}
+            testID="coach-availability-tab-view"
+          >
+            <CoachAvailabilityScreen onBack={() => setActiveTab('home')} />
           </View>
-
-          {/* User Details */}
-          <View style={styles.infoRow}>
-            <UserIcon size={16} color={COLORS.textMuted} style={styles.infoIcon} />
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Full Name</Text>
-              <Text style={styles.infoValue}>{user.name}</Text>
-            </View>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Mail size={16} color={COLORS.textMuted} style={styles.infoIcon} />
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Email Address</Text>
-              <Text style={styles.infoValue}>{user.email}</Text>
-            </View>
-          </View>
-
-          <View style={styles.infoRow}>
-            <ShieldCheck size={16} color={COLORS.textMuted} style={styles.infoIcon} />
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Account Role</Text>
-              <View style={styles.roleBadgeRow}>
-                <Text style={styles.infoValue}>{roleInfo ? roleInfo.title : user.role}</Text>
-                {roleInfo ? <Badge label={roleInfo.badge} variant="lime" /> : null}
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Role-Specific Experience */}
-        {user.role === 'parent' ? (
-          <ParentHomeView user={user} />
-        ) : user.role === 'individual' ? (
-          <IndividualHomeView user={user} />
-        ) : user.role === 'coach' ? (
-          <CoachHomeView user={user} />
+        ) : currentTab === 'profile' ? (
+          <UserProfileView user={user} onLogout={handleLogout} isLoading={isLoading} />
         ) : null}
+      </View>
 
-        {/* Sign Out Action */}
-        <View style={styles.actionsContainer}>
-          <Button
-            title="Sign Out"
-            variant="outline"
-            onPress={handleLogout}
-            loading={isLoading}
-            disabled={isLoading}
-            icon={<LogOut size={16} color={COLORS.navy} />}
-          />
-        </View>
-      </ScrollView>
+      {/* Persistent Bottom Navigation Bar */}
+      <BottomNavBar
+        activeTab={currentTab}
+        onTabChange={setActiveTab}
+        role={user.role}
+      />
     </View>
   );
 };
@@ -183,9 +217,18 @@ const styles = StyleSheet.create({
     color: COLORS.navy,
     letterSpacing: -0.3,
   },
+  contentArea: {
+    flex: 1,
+  },
+  mainScroll: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.lg,
+  },
+  fullScreenTab: {
+    flex: 1,
   },
   greetingHeader: {
     marginBottom: SPACING.lg,
@@ -200,89 +243,5 @@ const styles = StyleSheet.create({
     fontSize: 26,
     lineHeight: 32,
     color: COLORS.navy,
-  },
-  profileCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: RADII.lg,
-    padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.lg,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-    paddingBottom: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.mist,
-  },
-  cardTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  cardSectionTitle: {
-    ...TYPOGRAPHY.caption,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statusIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusDotActive: {
-    backgroundColor: COLORS.success,
-  },
-  statusDotInactive: {
-    backgroundColor: '#EF4444',
-  },
-  statusText: {
-    ...TYPOGRAPHY.caption,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC',
-  },
-  infoIcon: {
-    marginTop: 2,
-    marginRight: SPACING.md,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  infoValue: {
-    ...TYPOGRAPHY.bodyBold,
-    fontSize: 15,
-    color: COLORS.navy,
-  },
-  roleBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    marginTop: 2,
-  },
-  actionsContainer: {
-    marginTop: SPACING.sm,
   },
 });

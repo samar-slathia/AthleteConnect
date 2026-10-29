@@ -7,7 +7,7 @@ export type RootStackParamList = {
   RolePreview: { roleId: RoleId };
   Register: { initialRole: RoleId };
   Login: undefined;
-  Home: undefined;
+  Home: { initialTab?: string } | undefined;
 };
 
 export type WelcomeScreenProps = NativeStackScreenProps<

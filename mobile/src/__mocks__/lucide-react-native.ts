@@ -34,6 +34,19 @@ export const Target = createMockIcon('Target');
 export const Users = createMockIcon('Users');
 export const Award = createMockIcon('Award');
 export const Check = createMockIcon('Check');
+export const CheckCircle = createMockIcon('CheckCircle');
+export const Edit3 = createMockIcon('Edit3');
+export const Clock = createMockIcon('Clock');
+export const Calendar = createMockIcon('Calendar');
+export const MapPin = createMockIcon('MapPin');
+export const Phone = createMockIcon('Phone');
+export const XCircle = createMockIcon('XCircle');
+export const X = createMockIcon('X');
+export const MessageSquare = createMockIcon('MessageSquare');
+export const MessageCircle = createMockIcon('MessageCircle');
+export const Send = createMockIcon('Send');
+export const Navigation = createMockIcon('Navigation');
+export const Locate = createMockIcon('Locate');
 
 export default new Proxy(
   {},

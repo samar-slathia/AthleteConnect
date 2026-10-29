@@ -23,6 +23,7 @@ export default defineConfig({
       '@react-navigation/native': path.resolve(__dirname, './src/__mocks__/react-navigation-native.ts'),
       '@expo-google-fonts/inter': path.resolve(__dirname, './src/__mocks__/expo-google-fonts-inter.ts'),
       'expo-status-bar': path.resolve(__dirname, './src/__mocks__/expo-status-bar.ts'),
+      'expo-location': path.resolve(__dirname, './src/__mocks__/expo-location.ts'),
     },
   },
 });
