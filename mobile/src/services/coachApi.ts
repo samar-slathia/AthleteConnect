@@ -3,8 +3,10 @@ import { AuthApiError } from './authApi';
 
 export const COACH_DISCIPLINES = ['boxing', 'wushu', 'kickboxing'] as const;
 export const SESSION_FORMATS = ['one_on_one', 'small_group'] as const;
+export const ACTIVE_VENUE_TYPES = ['customer_home', 'ground'] as const;
 export const VENUE_TYPES = ['coach_home', 'customer_home', 'ground'] as const;
 
+export type ActiveVenueType = (typeof ACTIVE_VENUE_TYPES)[number];
 export type CoachDiscipline = (typeof COACH_DISCIPLINES)[number];
 export type SessionFormat = (typeof SESSION_FORMATS)[number];
 export type VenueType = (typeof VENUE_TYPES)[number];

@@ -37,8 +37,10 @@ import {
   CoachDiscipline,
   SessionFormat,
   VenueType,
+  ActiveVenueType,
   COACH_DISCIPLINES,
   SESSION_FORMATS,
+  ACTIVE_VENUE_TYPES,
   VENUE_TYPES,
   UpdateCoachProfileInput,
   AuthApiError,
@@ -60,10 +62,12 @@ const SESSION_FORMAT_LABELS: Record<SessionFormat, string> = {
   small_group: 'Small Group (2–6)',
 };
 
-const VENUE_TYPE_LABELS: Record<VenueType, string> = {
-  coach_home: 'Coach Studio / Home',
-  customer_home: "Athlete's Home",
-  ground: 'Outdoor / Sports Ground',
+const SELECTABLE_VENUE_TYPES: ActiveVenueType[] = ['customer_home', 'ground'];
+
+const VENUE_TYPE_LABELS: Record<string, string> = {
+  customer_home: "Customer's Home",
+  ground: 'Sports Ground',
+  coach_home: "Coach's Home (Legacy)",
 };
 
 const MAX_BIO_LENGTH = 1000;
@@ -131,8 +135,10 @@ export const CoachProfileEditScreen: React.FC<CoachProfileEditScreenProps> = ({
         setBio(response.profile.bio || '');
         setDisciplines(response.profile.disciplines || []);
         setSpecialties(response.profile.specialties || []);
-        setSessionFormats(response.profile.sessionFormats || []);
-        setVenueTypes(response.profile.venueTypes || []);
+        const activeVenues = (response.profile.venueTypes || []).filter(
+          (v): v is ActiveVenueType => v !== 'coach_home'
+        );
+        setVenueTypes(activeVenues);
         setHourlyRate(
           response.profile.hourlyRate !== undefined && response.profile.hourlyRate !== null
             ? String(response.profile.hourlyRate)
@@ -315,6 +321,17 @@ export const CoachProfileEditScreen: React.FC<CoachProfileEditScreenProps> = ({
 
     if (!validateForm()) return;
 
+    const sanitizedVenues = venueTypes.filter(
+      (v): v is ActiveVenueType => v !== ('coach_home' as any)
+    );
+
+    if (sanitizedVenues.length === 0) {
+      setSaveError(
+        "Please select at least one training venue type (Customer's Home or Sports Ground). Coach's Home is no longer an available training venue."
+      );
+      return;
+    }
+
     isSavingRef.current = true;
     setIsSaving(true);
     setSaveError(null);
@@ -326,7 +343,7 @@ export const CoachProfileEditScreen: React.FC<CoachProfileEditScreenProps> = ({
       disciplines,
       specialties,
       sessionFormats,
-      venueTypes,
+      venueTypes: sanitizedVenues,
       locations,
     };
 
@@ -346,7 +363,10 @@ export const CoachProfileEditScreen: React.FC<CoachProfileEditScreenProps> = ({
         setDisciplines(response.profile.disciplines || []);
         setSpecialties(response.profile.specialties || []);
         setSessionFormats(response.profile.sessionFormats || []);
-        setVenueTypes(response.profile.venueTypes || []);
+        const savedActiveVenues = (response.profile.venueTypes || []).filter(
+          (v): v is ActiveVenueType => v !== 'coach_home'
+        );
+        setVenueTypes(savedActiveVenues);
         setHourlyRate(
           response.profile.hourlyRate !== undefined && response.profile.hourlyRate !== null
             ? String(response.profile.hourlyRate)
@@ -674,7 +694,7 @@ export const CoachProfileEditScreen: React.FC<CoachProfileEditScreenProps> = ({
           </View>
           <Text style={styles.fieldGuide}>Select where you are willing to conduct sessions.</Text>
           <View style={styles.chipsContainer} testID="venue-types-selector">
-            {VENUE_TYPES.map((vType) => {
+            {SELECTABLE_VENUE_TYPES.map((vType) => {
               const selected = venueTypes.includes(vType);
               return (
                 <TouchableOpacity

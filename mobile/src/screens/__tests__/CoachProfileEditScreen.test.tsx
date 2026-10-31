@@ -654,3 +654,149 @@ describe('CoachHomeView - Profile Editor Integration', () => {
     cleanup();
   });
 });
+
+describe('CoachProfileEditScreen — Phase 3C Venue Configuration', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("offers ONLY Customer's Home and Sports Ground; Coach's Home chip is never rendered", async () => {
+    (getCoachProfile as any).mockResolvedValue({
+      profile: mockPopulatedProfile,
+      isComplete: true,
+    } as CoachProfileResponse);
+
+    const { render, cleanup } = createHarness(
+      React.createElement(CoachProfileEditScreen, {})
+    );
+
+    await flushPromises();
+    const tree = render();
+
+    // Coach's Home chip must NEVER exist
+    expect(findElement(tree, (el) => el.props?.testID === 'venue-type-chip-coach_home')).toBeNull();
+
+    // Customer's Home and Sports Ground chips exist with final product labels
+    const homeChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-customer_home');
+    const groundChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-ground');
+    expect(homeChip).not.toBeNull();
+    expect(groundChip).not.toBeNull();
+
+    expect(findElement(homeChip, (el) => el.props?.children === "Customer's Home")).not.toBeNull();
+    expect(findElement(groundChip, (el) => el.props?.children === "Sports Ground")).not.toBeNull();
+
+    cleanup();
+  });
+
+  it("safely sanitizes legacy profile: coach_home in stored profile is stripped and never sent on save", async () => {
+    const legacyProfile: CoachProfile = {
+      ...mockPopulatedProfile,
+      venueTypes: ['coach_home', 'ground'] as any,
+    };
+    (getCoachProfile as any).mockResolvedValue({
+      profile: legacyProfile,
+      isComplete: true,
+    } as CoachProfileResponse);
+
+    (updateCoachProfile as any).mockResolvedValue({
+      profile: { ...legacyProfile, venueTypes: ['ground'] },
+      isComplete: true,
+      message: 'Profile saved',
+    } as CoachProfileResponse);
+
+    const { render, cleanup } = createHarness(
+      React.createElement(CoachProfileEditScreen, {})
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Ground is checked because it was in profile
+    const groundChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-ground');
+    expect(groundChip.props.accessibilityState.checked).toBe(true);
+
+    // Save profile
+    const saveBtn = findElement(tree, (el) => el.props?.title === 'Save Profile');
+    await saveBtn.props.onPress();
+    await flushPromises();
+
+    // updateCoachProfile MUST NOT contain coach_home
+    expect(updateCoachProfile).toHaveBeenCalledWith(
+      'valid_mock_jwt_token',
+      expect.objectContaining({
+        venueTypes: ['ground'],
+      })
+    );
+    expect(updateCoachProfile).not.toHaveBeenCalledWith(
+      'valid_mock_jwt_token',
+      expect.objectContaining({
+        venueTypes: expect.arrayContaining(['coach_home']),
+      })
+    );
+
+    cleanup();
+  });
+
+  it("handles legacy profile with only coach_home by requiring an active venue selection before save", async () => {
+    const onlyCoachHomeProfile: CoachProfile = {
+      ...mockPopulatedProfile,
+      venueTypes: ['coach_home'] as any,
+    };
+    (getCoachProfile as any).mockResolvedValue({
+      profile: onlyCoachHomeProfile,
+      isComplete: false,
+    } as CoachProfileResponse);
+
+    (updateCoachProfile as any).mockResolvedValue({
+      profile: { ...onlyCoachHomeProfile, venueTypes: ['customer_home'] },
+      isComplete: true,
+      message: 'Profile saved',
+    } as CoachProfileResponse);
+
+    const { render, cleanup } = createHarness(
+      React.createElement(CoachProfileEditScreen, {})
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Since only coach_home was stored, active venues is empty
+    const homeChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-customer_home');
+    const groundChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-ground');
+    expect(homeChip.props.accessibilityState.checked).toBe(false);
+    expect(groundChip.props.accessibilityState.checked).toBe(false);
+
+    // Attempting to save without selecting a venue triggers validation error
+    const saveBtn = findElement(tree, (el) => el.props?.title === 'Save Profile');
+    await saveBtn.props.onPress();
+    tree = render();
+
+    expect(updateCoachProfile).not.toHaveBeenCalled();
+    const errorBanner = findElement(tree, (el) => el.props?.testID === 'save-error-banner');
+    expect(errorBanner).not.toBeNull();
+    expect(
+      findElement(errorBanner, (el) => typeof el.props?.children === 'string' && el.props.children.includes('training venue'))
+    ).not.toBeNull();
+
+    // Coach selects Customer's Home
+    homeChip.props.onPress();
+    tree = render();
+    const updatedHomeChip = findElement(tree, (el) => el.props?.testID === 'venue-type-chip-customer_home');
+    expect(updatedHomeChip.props.accessibilityState.checked).toBe(true);
+
+    // Now save succeeds
+    const updatedSaveBtn = findElement(tree, (el) => el.props?.title === 'Save Profile');
+    await updatedSaveBtn.props.onPress();
+    await flushPromises();
+
+    expect(updateCoachProfile).toHaveBeenCalledWith(
+      'valid_mock_jwt_token',
+      expect.objectContaining({
+        venueTypes: ['customer_home'],
+      })
+    );
+
+    cleanup();
+  });
+});
+

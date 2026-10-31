@@ -24,6 +24,9 @@ export default defineConfig({
       '@expo-google-fonts/inter': path.resolve(__dirname, './src/__mocks__/expo-google-fonts-inter.ts'),
       'expo-status-bar': path.resolve(__dirname, './src/__mocks__/expo-status-bar.ts'),
       'expo-location': path.resolve(__dirname, './src/__mocks__/expo-location.ts'),
+      'expo-image-picker': path.resolve(__dirname, './src/__mocks__/expo-image-picker.ts'),
+      'expo-file-system/legacy': path.resolve(__dirname, './src/__mocks__/expo-file-system.ts'),
+      'expo-file-system': path.resolve(__dirname, './src/__mocks__/expo-file-system.ts'),
     },
   },
 });

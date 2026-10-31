@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   User as UserIcon,
@@ -27,12 +27,16 @@ import {
   SessionFormat,
 } from '../../services/coachApi';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
+import { useProfilePhoto } from '../../services/profilePhotoService';
 
 export interface UserProfileViewProps {
   user: UserProfile;
   token?: string | null;
   onLogout?: () => Promise<void> | void;
   isLoading?: boolean;
+  photoUri?: string | null;
+  onPhotoChange?: (uri: string | null) => void;
 }
 
 const DISCIPLINE_LABELS: Record<CoachDiscipline, string> = {
@@ -51,10 +55,32 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
   token,
   onLogout,
   isLoading = false,
+  photoUri: propPhotoUri,
+  onPhotoChange,
 }) => {
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const effectiveToken = token !== undefined ? token : auth?.token ?? null;
+
+  const {
+    photoUri: hookPhotoUri,
+    isLoading: isLoadingPhoto,
+    syncStatus,
+    error: photoError,
+    pickAndSavePhoto,
+    retrySync,
+    clearError: clearPhotoError,
+  } = useProfilePhoto(user?._id);
+
+  const effectivePhotoUri = propPhotoUri !== undefined ? propPhotoUri : hookPhotoUri;
+
+  const handlePhotoPress = async () => {
+    clearPhotoError();
+    const newUri = await pickAndSavePhoto();
+    if (newUri && onPhotoChange) {
+      onPhotoChange(newUri);
+    }
+  };
 
   const [isEditingCoach, setIsEditingCoach] = useState<boolean>(false);
   const [coachProfile, setCoachProfile] = useState<CoachProfile | null>(null);
@@ -114,18 +140,49 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
     >
       {/* Profile Header Greeting */}
       <View style={styles.header}>
-        <View style={styles.avatarBadge}>
-          <Text style={styles.avatarInitials}>
-            {user.name
-              ? user.name
-                  .split(' ')
-                  .map((n) => n[0])
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase()
-              : 'U'}
-          </Text>
-        </View>
+        <ProfileAvatar
+          name={user.name}
+          imageUri={effectivePhotoUri}
+          onPress={handlePhotoPress}
+          disabled={isLoadingPhoto}
+          testID="profile-avatar"
+        />
+
+        {/* Loading indicator during photo selection and saving */}
+        {isLoadingPhoto ? (
+          <View style={styles.photoFeedbackRow} testID="photo-saving-loader">
+            <ActivityIndicator size="small" color={COLORS.navy} />
+            <Text style={styles.photoLoadingText}>Saving photo...</Text>
+          </View>
+        ) : null}
+
+        {/* Syncing indicator during background cloud upload */}
+        {syncStatus === 'syncing' && !isLoadingPhoto ? (
+          <View style={styles.photoFeedbackRow} testID="photo-syncing-indicator">
+            <ActivityIndicator size="small" color={COLORS.navy} />
+            <Text style={styles.photoLoadingText}>Syncing to cloud...</Text>
+          </View>
+        ) : null}
+
+        {/* Error message banner if photo selection or save fails */}
+        {photoError ? (
+          <View style={styles.photoFeedbackRow} testID="photo-error-banner">
+            <AlertCircle size={14} color="#DC2626" />
+            <Text style={styles.photoErrorText}>{photoError}</Text>
+            {syncStatus === 'local_only' ? (
+              <TouchableOpacity
+                onPress={retrySync}
+                style={styles.retryTouch}
+                testID="photo-retry-button"
+                accessibilityRole="button"
+                accessibilityLabel="Retry cloud sync"
+              >
+                <Text style={styles.retryTouchText}>Retry</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+
         <Text style={styles.headerName}>{user.name}</Text>
         <View style={styles.rolePillWrap}>
           <Badge label={roleInfo ? roleInfo.title : user.role} variant="lime" />
@@ -558,5 +615,35 @@ const styles = StyleSheet.create({
   actionsContainer: {
     marginTop: SPACING.xs,
     marginBottom: SPACING.lg,
+  },
+  photoFeedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.xs,
+  },
+  photoLoadingText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.navy,
+    fontWeight: '600',
+  },
+  photoErrorText: {
+    ...TYPOGRAPHY.caption,
+    color: '#DC2626',
+    fontWeight: '500',
+  },
+  retryTouch: {
+    marginLeft: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: COLORS.navy,
+    borderRadius: RADII.sm,
+  },
+  retryTouchText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.white,
+    fontWeight: '700',
   },
 });

@@ -9,6 +9,8 @@ export interface UserProfile {
   email: string;
   role: CustomerRole;
   isActive: boolean;
+  photoFileId?: string | null;
+  photoUpdatedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

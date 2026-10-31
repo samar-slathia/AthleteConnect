@@ -12,6 +12,8 @@ export interface IUser {
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
+  photoFileId?: mongoose.Types.ObjectId | null;
+  photoUpdatedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -55,6 +57,15 @@ const UserSchema = new Schema<IUserDocument>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    photoFileId: {
+      type: Schema.Types.ObjectId,
+      default: null,
+      ref: 'profile_photos.files',
+    },
+    photoUpdatedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

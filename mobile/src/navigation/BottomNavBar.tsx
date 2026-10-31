@@ -1,31 +1,43 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Compass, Calendar, Clock, User } from 'lucide-react-native';
+import { Home, Users, Calendar, Clock, User, Inbox } from 'lucide-react-native';
 import { CustomerRole } from '../services/authApi';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
+export type NavTab =
+  | 'home'
+  | 'coaches'
+  | 'bookings'
+  | 'requests'
+  | 'sessions'
+  | 'availability'
+  | 'profile';
+
 export interface TabItem {
-  id: string;
+  id: NavTab;
   label: string;
   icon: React.ComponentType<{ size: number; color: string }>;
+  badge?: number | string;
 }
 
 export interface BottomNavBarProps {
   activeTab: string;
   onTabChange: (tabId: string) => void;
   role: CustomerRole;
+  badges?: Partial<Record<NavTab, number | string>>;
 }
 
 const CUSTOMER_TABS: TabItem[] = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'discover', label: 'Discover', icon: Compass },
+  { id: 'coaches', label: 'Coaches', icon: Users },
   { id: 'bookings', label: 'Bookings', icon: Calendar },
   { id: 'profile', label: 'Profile', icon: User },
 ];
 
 const COACH_TABS: TabItem[] = [
   { id: 'home', label: 'Home', icon: Home },
+  { id: 'requests', label: 'Requests', icon: Inbox },
   { id: 'sessions', label: 'Sessions', icon: Calendar },
   { id: 'availability', label: 'Availability', icon: Clock },
   { id: 'profile', label: 'Profile', icon: User },
@@ -42,6 +54,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   activeTab,
   onTabChange,
   role,
+  badges,
 }) => {
   const insets = useSafeAreaInsets();
   const tabs = getTabsForRole(role);
@@ -60,6 +73,14 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;
 
+          const rawBadge = badges?.[tab.id];
+          const badgeContent =
+            rawBadge !== undefined && rawBadge !== 0 && rawBadge !== '0'
+              ? typeof rawBadge === 'number' && rawBadge > 9
+                ? '9+'
+                : String(rawBadge)
+              : null;
+
           return (
             <TouchableOpacity
               key={tab.id}
@@ -68,7 +89,11 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
               activeOpacity={0.7}
               accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
-              accessibilityLabel={`${tab.label} tab`}
+              accessibilityLabel={
+                badgeContent
+                  ? `${tab.label} tab, ${badgeContent} pending`
+                  : `${tab.label} tab`
+              }
               testID={`tab-${tab.id}`}
             >
               <View style={styles.indicatorContainer}>
@@ -83,6 +108,11 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                   size={20}
                   color={isActive ? COLORS.navy : COLORS.textMuted}
                 />
+                {badgeContent ? (
+                  <View style={styles.badgeWrap} testID={`tab-badge-${tab.id}`}>
+                    <Text style={styles.badgeText}>{badgeContent}</Text>
+                  </View>
+                ) : null}
               </View>
               <Text
                 style={[
@@ -90,6 +120,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
                   isActive ? styles.tabLabelActive : styles.tabLabelInactive,
                 ]}
                 numberOfLines={1}
+                ellipsizeMode="tail"
               >
                 {tab.label}
               </Text>
@@ -118,12 +149,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-around',
     height: 52,
+    paddingHorizontal: 2,
   },
   tabButton: {
     flex: 1,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 2,
+    paddingHorizontal: 1,
   },
   indicatorContainer: {
     height: 3,
@@ -132,13 +167,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   activeIndicator: {
-    width: 22,
+    width: 18,
     height: 3,
     borderRadius: RADII.full,
     backgroundColor: COLORS.lime,
   },
   inactiveIndicator: {
-    width: 22,
+    width: 18,
     height: 3,
     backgroundColor: 'transparent',
   },
@@ -146,11 +181,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: 24,
+    width: 24,
+    position: 'relative',
+  },
+  badgeWrap: {
+    position: 'absolute',
+    top: -4,
+    right: -10,
+    backgroundColor: '#DC2626',
+    borderRadius: RADII.full,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  badgeText: {
+    color: COLORS.white,
+    fontSize: 9.5,
+    fontWeight: '700',
+    lineHeight: 11,
+    textAlign: 'center',
   },
   tabLabel: {
-    fontSize: 11,
-    letterSpacing: 0.1,
+    fontSize: 10.5,
+    letterSpacing: 0,
     marginTop: 2,
+    textAlign: 'center',
   },
   tabLabelActive: {
     fontWeight: '700',

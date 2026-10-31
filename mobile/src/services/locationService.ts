@@ -314,17 +314,69 @@ export async function detectDeviceLocation(
 export interface MapDestination {
   coordinates?: BookingCoordinates;
   address?: string;
+  venueType?: string;
+}
+
+export interface ResolveGroundDestinationParams {
+  manualAddress?: string | null;
+  groundName?: string | null;
+  coachDesignatedLocation?: string | null;
+}
+
+/**
+ * Resolves the authoritative training destination for a Sports Ground session based on product priority rules:
+ *
+ * 1. Manually entered full ground address, when provided.
+ *    (Combines ground name if also provided and not already included in the address).
+ * 2. Manually entered ground name combined with its available address details.
+ *    (Combines ground name with coach's designated ground/city if available).
+ * 3. Selected coach-designated ground address/location, when no manual override is provided.
+ *
+ * Guaranteed: A generic configured city/location (e.g. "Jammu") NEVER overrides a more specific manually entered address.
+ */
+export function resolveGroundDestination(params: ResolveGroundDestinationParams): string {
+  const manual = params.manualAddress ? params.manualAddress.trim() : '';
+  const ground = params.groundName ? params.groundName.trim() : '';
+  const coachLoc = params.coachDesignatedLocation ? params.coachDesignatedLocation.trim() : '';
+
+  // Priority 1: Manually entered full ground address, when provided.
+  if (manual) {
+    if (ground && !manual.toLowerCase().includes(ground.toLowerCase())) {
+      return `${ground}, ${manual}`;
+    }
+    return manual;
+  }
+
+  // Priority 2: Manually entered ground name combined with its available address details.
+  if (ground) {
+    if (coachLoc && !coachLoc.toLowerCase().includes(ground.toLowerCase())) {
+      return `${ground}, ${coachLoc}`;
+    }
+    return ground;
+  }
+
+  // Priority 3: Selected coach-designated ground address/location, when no manual override is provided.
+  if (coachLoc) {
+    return coachLoc;
+  }
+
+  return '';
 }
 
 /**
  * Builds an external Google Maps directions link without any paid API keys.
  * Priority:
- * 1. If coordinates available: destination=lat,lng
- * 2. If address available: destination=urlEncodedAddress
- * 3. Else null.
+ * - For venueType === 'ground': Always uses the exact destination address. Never uses customer coordinates.
+ * - For other venues (e.g. customer_home):
+ *   1. If coordinates available: destination=lat,lng
+ *   2. If address available: destination=urlEncodedAddress
+ *   3. Else null.
  */
 export function buildGoogleMapsUrl(destination: MapDestination): string | null {
+  const isGround = destination.venueType === 'ground';
+
   if (
+    !isGround &&
     destination.coordinates &&
     typeof destination.coordinates.latitude === 'number' &&
     !isNaN(destination.coordinates.latitude) &&

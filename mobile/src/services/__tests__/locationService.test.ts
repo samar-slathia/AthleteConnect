@@ -6,6 +6,7 @@ import {
   buildGoogleMapsUrl,
   openInGoogleMaps,
   formatGeocodedAddress,
+  resolveGroundDestination,
 } from '../locationService';
 
 vi.mock('expo-location', () => ({
@@ -453,6 +454,137 @@ describe('locationService', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Unable to launch Google Maps');
+    });
+
+    it('strictly ignores coordinates for ground sessions and navigates using ground address', async () => {
+      vi.spyOn(Linking, 'canOpenURL').mockResolvedValue(true);
+      const openSpy = vi.spyOn(Linking, 'openURL').mockResolvedValue(undefined as any);
+
+      await openInGoogleMaps({
+        coordinates: { latitude: 12.9716, longitude: 77.5946 },
+        address: 'MA Stadium, Parade Ground Road, Jammu, Jammu and Kashmir, India',
+        venueType: 'ground',
+      });
+
+      expect(openSpy).toHaveBeenCalledWith(
+        'https://www.google.com/maps/dir/?api=1&destination=MA%20Stadium%2C%20Parade%20Ground%20Road%2C%20Jammu%2C%20Jammu%20and%20Kashmir%2C%20India'
+      );
+    });
+  });
+
+  describe('resolveGroundDestination (Priority Rules)', () => {
+    it('Priority 1: specific manual address + ground name override generic coach location "Jammu"', () => {
+      const destination = resolveGroundDestination({
+        manualAddress: 'Parade Ground Road, Jammu, Jammu and Kashmir, India',
+        groundName: 'MA Stadium',
+        coachDesignatedLocation: 'Jammu',
+      });
+
+      expect(destination).toBe('MA Stadium, Parade Ground Road, Jammu, Jammu and Kashmir, India');
+    });
+
+    it('Priority 1: specific manual address alone overrides generic coach location "Jammu"', () => {
+      const destination = resolveGroundDestination({
+        manualAddress: 'Parade Ground Road, Jammu, Jammu and Kashmir, India',
+        coachDesignatedLocation: 'Jammu',
+      });
+
+      expect(destination).toBe('Parade Ground Road, Jammu, Jammu and Kashmir, India');
+    });
+
+    it('Priority 1: does not duplicate ground name when address already includes it', () => {
+      const destination = resolveGroundDestination({
+        manualAddress: 'MA Stadium, Parade Ground Road, Jammu',
+        groundName: 'MA Stadium',
+        coachDesignatedLocation: 'Jammu',
+      });
+
+      expect(destination).toBe('MA Stadium, Parade Ground Road, Jammu');
+    });
+
+    it('Priority 2: ground name combined with coach designated location when address is absent', () => {
+      const destination = resolveGroundDestination({
+        groundName: 'MA Stadium',
+        coachDesignatedLocation: 'Jammu',
+      });
+
+      expect(destination).toBe('MA Stadium, Jammu');
+    });
+
+    it('Priority 2: ground name returned when coach location is absent', () => {
+      const destination = resolveGroundDestination({
+        groundName: 'MA Stadium',
+      });
+
+      expect(destination).toBe('MA Stadium');
+    });
+
+    it('Priority 3: coach-designated location used when no manual override is provided', () => {
+      const destination = resolveGroundDestination({
+        coachDesignatedLocation: 'Jammu',
+      });
+
+      expect(destination).toBe('Jammu');
+    });
+
+    it('returns empty string when no location information is provided', () => {
+      expect(resolveGroundDestination({})).toBe('');
+      expect(resolveGroundDestination({ manualAddress: '   ', groundName: '' })).toBe('');
+    });
+  });
+
+  describe('buildGoogleMapsUrl (Ground vs Customer Home vs Coach Home)', () => {
+    it('Sports Ground: uses exact ground address and ignores customer GPS coordinates', () => {
+      const url = buildGoogleMapsUrl({
+        venueType: 'ground',
+        coordinates: { latitude: 32.7266, longitude: 74.857 },
+        address: 'MA Stadium, Parade Ground Road, Jammu, Jammu and Kashmir, India',
+      });
+
+      expect(url).toBe(
+        'https://www.google.com/maps/dir/?api=1&destination=MA%20Stadium%2C%20Parade%20Ground%20Road%2C%20Jammu%2C%20Jammu%20and%20Kashmir%2C%20India'
+      );
+    });
+
+    it('Sports Ground: uses coach-designated ground when no manual address override', () => {
+      const url = buildGoogleMapsUrl({
+        venueType: 'ground',
+        address: 'Jammu',
+      });
+
+      expect(url).toBe('https://www.google.com/maps/dir/?api=1&destination=Jammu');
+    });
+
+    it("Customer's Home: prioritizes customer GPS coordinates over address", () => {
+      const url = buildGoogleMapsUrl({
+        venueType: 'customer_home',
+        coordinates: { latitude: 12.9716, longitude: 77.5946 },
+        address: '12 12th Main, Indiranagar, Bangalore',
+      });
+
+      expect(url).toBe('https://www.google.com/maps/dir/?api=1&destination=12.9716,77.5946');
+    });
+
+    it("Customer's Home: falls back to address when coordinates are absent", () => {
+      const url = buildGoogleMapsUrl({
+        venueType: 'customer_home',
+        address: '12 12th Main, Indiranagar, Bangalore',
+      });
+
+      expect(url).toBe(
+        'https://www.google.com/maps/dir/?api=1&destination=12%2012th%20Main%2C%20Indiranagar%2C%20Bangalore'
+      );
+    });
+
+    it("Historical Coach's Home: remains navigable using address", () => {
+      const url = buildGoogleMapsUrl({
+        venueType: 'coach_home',
+        address: '77 Coach Studio Road, Bangalore',
+      });
+
+      expect(url).toBe(
+        'https://www.google.com/maps/dir/?api=1&destination=77%20Coach%20Studio%20Road%2C%20Bangalore'
+      );
     });
   });
 });

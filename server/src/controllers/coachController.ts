@@ -4,6 +4,7 @@ import {
   COACH_DISCIPLINES,
   SESSION_FORMATS,
   VENUE_TYPES,
+  ACTIVE_VENUE_TYPES,
   MIN_HOURLY_RATE,
   MAX_HOURLY_RATE,
   MAX_BIO_LENGTH,
@@ -19,6 +20,7 @@ import {
   CoachDiscipline,
   SessionFormat,
   VenueType,
+  ActiveVenueType,
 } from '../models/CoachProfile';
 
 const ALLOWED_UPDATE_FIELDS = new Set([
@@ -186,22 +188,27 @@ export async function updateProfileMe(
       }
     }
 
-    // 6. Validate venueTypes (optional array of VENUE_TYPES, unique, max 3)
+    // 6. Validate venueTypes (optional array of ACTIVE_VENUE_TYPES, unique, max 2)
     if (venueTypes !== undefined && venueTypes !== null) {
       if (!Array.isArray(venueTypes)) {
         return res.status(400).json({ error: 'venueTypes must be an array.' });
       }
-      if (venueTypes.length > MAX_VENUE_TYPES_COUNT) {
-        return res.status(400).json({
-          error: `Venue types cannot exceed ${MAX_VENUE_TYPES_COUNT} items.`,
-        });
-      }
       for (const vType of venueTypes) {
-        if (typeof vType !== 'string' || !VENUE_TYPES.includes(vType as VenueType)) {
+        if (vType === 'coach_home') {
           return res.status(400).json({
-            error: `Invalid venue type "${vType}". Allowed venue types are: ${VENUE_TYPES.join(', ')}.`,
+            error: "Coach's Home is not an allowed venue type. Coaches may only select Customer's Home and/or Sports Ground.",
           });
         }
+        if (typeof vType !== 'string' || !ACTIVE_VENUE_TYPES.includes(vType as ActiveVenueType)) {
+          return res.status(400).json({
+            error: `Invalid venue type "${vType}". Allowed venue types are: ${ACTIVE_VENUE_TYPES.join(', ')}.`,
+          });
+        }
+      }
+      if (venueTypes.length > ACTIVE_VENUE_TYPES.length) {
+        return res.status(400).json({
+          error: `Venue types cannot exceed ${ACTIVE_VENUE_TYPES.length} items.`,
+        });
       }
       if (new Set(venueTypes).size !== venueTypes.length) {
         return res.status(400).json({ error: 'Duplicate venue types are not permitted.' });

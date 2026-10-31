@@ -14,9 +14,9 @@ export interface CustomerBookingCardProps {
 }
 
 const VENUE_LABELS: Record<string, string> = {
-  coach_home: 'Coach Home / Studio',
-  customer_home: 'Trainee Home',
-  ground: 'Sports Ground / Facility',
+  customer_home: "Customer's Home",
+  ground: 'Sports Ground',
+  coach_home: "Coach's Home (Legacy)",
 };
 
 export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
@@ -68,9 +68,11 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
   const showActionRow = (canCancel && Boolean(onCancel)) || (canChat && Boolean(onOpenChat)) || hasValidDestination;
 
   const handleOpenMaps = () => {
+    const isGround = booking.venueType === 'ground';
     openInGoogleMaps({
-      coordinates: booking.coordinates || booking.locationCoordinates,
+      coordinates: isGround ? undefined : (booking.coordinates || booking.locationCoordinates),
       address: booking.trainingAddress,
+      venueType: booking.venueType,
     });
   };
 
@@ -126,9 +128,20 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
         </View>
       ) : null}
 
-      {booking.status === 'cancelled' && booking.cancellationReason ? (
-        <View style={styles.noteBox}>
-          <Text style={styles.noteLabel}>Cancellation Reason: {booking.cancellationReason}</Text>
+      {booking.status === 'cancelled' ? (
+        <View style={styles.noteBox} testID={`cancellation-note-${booking._id}`}>
+          <Text style={styles.noteLabel} testID={`cancellation-actor-${booking._id}`}>
+            {booking.cancelledBy === 'customer'
+              ? 'Cancelled by You'
+              : booking.cancelledBy === 'coach'
+              ? 'Cancelled by Coach'
+              : 'Cancelled'}
+          </Text>
+          {booking.cancellationReason ? (
+            <Text style={styles.noteReason} testID={`cancellation-reason-${booking._id}`}>
+              Reason: {booking.cancellationReason}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -250,6 +263,12 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.caption,
     fontSize: 11.5,
     color: '#991B1B',
+  },
+  noteReason: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11.5,
+    color: '#991B1B',
+    marginTop: 2,
   },
   actionRow: {
     flexDirection: 'row',

@@ -5,6 +5,7 @@ import {
   BOOKING_STATUSES,
   COACH_DISCIPLINES,
   VENUE_TYPES,
+  ACTIVE_VENUE_TYPES,
   MAX_REASON_LENGTH,
   validateBookingTimes,
   validateCustomerPhone,
@@ -101,9 +102,14 @@ export async function createBooking(
     const cleanSport = sport.trim() as any;
 
     // 4. Validate venueType
-    if (!venueType || typeof venueType !== 'string' || !VENUE_TYPES.includes(venueType.trim() as any)) {
+    if (venueType === 'coach_home') {
       return res.status(400).json({
-        error: `Invalid venueType "${venueType}". Allowed venue types are: ${VENUE_TYPES.join(', ')}.`,
+        error: "Coach's Home is not an available training venue. Sessions may only take place at Customer's Home or a designated Sports Ground.",
+      });
+    }
+    if (!venueType || typeof venueType !== 'string' || !ACTIVE_VENUE_TYPES.includes(venueType.trim() as any)) {
+      return res.status(400).json({
+        error: `Invalid venueType "${venueType}". Allowed venue types are: ${ACTIVE_VENUE_TYPES.join(', ')}.`,
       });
     }
     const cleanVenueType = venueType.trim() as any;
@@ -173,6 +179,11 @@ export async function createBooking(
         });
       }
       cleanCoordinates = { latitude, longitude };
+    }
+
+    // Customer GPS coordinates are never attached to a Sports Ground session
+    if (cleanVenueType === 'ground') {
+      cleanCoordinates = undefined;
     }
 
     // 9. Coach Profile check & hourly rate snapshot
@@ -268,7 +279,7 @@ export async function getBookings(
     const bookings = await Booking.find(filter)
       .populate('customerId', 'name')
       .populate('coachId', 'name')
-      .sort({ date: 1, startMinutes: 1 });
+      .sort({ createdAt: -1, _id: -1 });
 
     const serializedBookings = bookings
       .map((b) => serializeBookingForUser(b, req.user!.id, req.user!.role))

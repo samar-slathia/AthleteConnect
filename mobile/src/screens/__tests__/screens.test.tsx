@@ -845,7 +845,7 @@ const mockCoachesList: CoachDiscoveryItem[] = [
       disciplines: ['boxing', 'kickboxing'],
       specialties: ['Focus Mitts'],
       sessionFormats: ['1-on-1'],
-      venueTypes: ['coach_home', 'customer_home'],
+      venueTypes: ['customer_home', 'ground'],
       hourlyRate: 50,
       currency: 'INR',
       locations: ['Indiranagar'],
@@ -1515,7 +1515,7 @@ describe('BookingRequestModal', () => {
       date: '2028-11-25',
       startTime: '10:00',
       endTime: '11:30',
-      venueType: 'coach_home',
+      venueType: 'customer_home',
       trainingAddress: 'Indiranagar Boxing Studio, 12th Main Road',
       customerPhone: '+919876543210',
     });
@@ -1653,7 +1653,7 @@ describe('BookingRequestModal', () => {
     cleanup();
   });
 
-  it('Coach Studio venue: uses coach configured studio location and does not request trainee home address', async () => {
+  it("Venue options: Coach's Home is completely removed and only Customer's Home and Sports Ground are offered", async () => {
     (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
 
     const { render, cleanup } = createInteractiveHarness(
@@ -1675,34 +1675,23 @@ describe('BookingRequestModal', () => {
     coach1Chip.props.onPress();
     tree = render();
 
-    // Coach Studio is default venue ('coach_home')
-    const studioDisplay = findElement(tree, (el) => el.props?.testID === 'coach-studio-location-display');
-    expect(studioDisplay).not.toBeNull();
-    expect(findElement(studioDisplay, (el) => typeof el.props?.children === 'string' && el.props.children.includes('Indiranagar'))).not.toBeNull();
+    // Coach's Home must NEVER be rendered
+    expect(findElement(tree, (el) => el.props?.testID === 'venue-pill-coach_home')).toBeNull();
 
-    // Trainee home address fields should NOT be shown
-    expect(findElement(tree, (el) => el.props?.testID === 'input-home-house')).toBeNull();
-    expect(findElement(tree, (el) => el.props?.testID === 'input-home-street')).toBeNull();
+    // Customer's Home is default venue
+    const customerHomePill = findElement(tree, (el) => el.props?.testID === 'venue-pill-customer_home');
+    expect(customerHomePill).not.toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'trainee-home-address-notice')).not.toBeNull();
 
-    // Location summary preview shows studio address
-    const summary = findElement(tree, (el) => el.props?.testID === 'location-summary-preview');
-    expect(summary).not.toBeNull();
-    const summaryAddress = findElement(tree, (el) => el.props?.testID === 'location-summary-address');
-    expect(summaryAddress.props?.children).toBe('Indiranagar');
+    // Sports Ground is also offered
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    expect(groundPill).not.toBeNull();
 
     cleanup();
   });
 
-  it('Coach Studio venue: shows fallback warning notice when coach has no studio location configured', async () => {
-    const coachWithoutLocation: CoachDiscoveryItem = {
-      ...mockCoachesList[0],
-      _id: 'coach_no_loc',
-      profile: {
-        ...mockCoachesList[0].profile!,
-        locations: [],
-      },
-    };
-    (getPublicCoaches as any).mockResolvedValue([coachWithoutLocation]);
+  it('Sports Ground venue: never renders Detect My Location button or customer GPS indicators', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
 
     const { render, cleanup } = createInteractiveHarness(
       React.createElement(BookingRequestModal, {
@@ -1718,27 +1707,26 @@ describe('BookingRequestModal', () => {
     const boxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
     boxingPill.props.onPress();
     tree = render();
-    const coachChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_no_loc');
-    coachChip.props.onPress();
+    const coach1Chip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    coach1Chip.props.onPress();
     tree = render();
 
-    // Fallback notice rendered
-    const warningNotice = findElement(tree, (el) => el.props?.testID === 'coach-studio-missing-notice');
-    expect(warningNotice).not.toBeNull();
+    // Select Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // NEVER render Detect My Location or GPS indicators on Sports Ground
+    expect(findElement(tree, (el) => el.props?.testID === 'button-detect-location')).toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'location-detecting-indicator')).toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'location-detected-coordinates')).toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'sports-ground-notice')).not.toBeNull();
 
     cleanup();
   });
 
-  it('Coach Studio venue: multiple configured locations displays selector, blocks unselected submission, and updates on choice', async () => {
-    const multiLocationCoach: CoachDiscoveryItem = {
-      ...mockCoachesList[0],
-      _id: 'coach_multi_loc',
-      profile: {
-        ...mockCoachesList[0].profile!,
-        locations: ['Indiranagar Studio', 'Whitefield Studio', 'Koramangala Center'],
-      },
-    };
-    (getPublicCoaches as any).mockResolvedValue([multiLocationCoach]);
+  it('Sports Ground venue: booking payload uses selected ground and never attaches customer coordinates', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
     (createBooking as any).mockResolvedValue(mockPendingBooking);
 
     const { render, cleanup } = createInteractiveHarness(
@@ -1755,45 +1743,40 @@ describe('BookingRequestModal', () => {
     const boxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
     boxingPill.props.onPress();
     tree = render();
-    const coachChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_multi_loc');
-    coachChip.props.onPress();
+    const coach1Chip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    coach1Chip.props.onPress();
     tree = render();
 
-    // 1. Selector is displayed with 3 options
-    const selector = findElement(tree, (el) => el.props?.testID === 'coach-studio-location-selector');
-    expect(selector).not.toBeNull();
-    const opt0 = findElement(tree, (el) => el.props?.testID === 'coach-location-option-0');
-    const opt1 = findElement(tree, (el) => el.props?.testID === 'coach-location-option-1');
-    const opt2 = findElement(tree, (el) => el.props?.testID === 'coach-location-option-2');
-    expect(opt0).not.toBeNull();
-    expect(opt1).not.toBeNull();
-    expect(opt2).not.toBeNull();
+    // Select Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
 
-    // 2. Neither is silently selected, prompt is displayed
-    const prompt = findElement(tree, (el) => el.props?.testID === 'prompt-select-coach-location');
-    expect(prompt).not.toBeNull();
+    // Fill phone and submit
+    const dateInput = findElement(tree, (el) => el.props?.testID === 'input-booking-date');
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    const endInput = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+    const phoneInput = findElement(tree, (el) => el.props?.testID === 'input-booking-phone');
 
-    // 3. Submitting without choosing an option triggers validation error
+    dateInput.props.onChangeText('2028-11-25');
+    startInput.props.onChangeText('10:00');
+    endInput.props.onChangeText('11:00');
+    phoneInput.props.onChangeText('+919876543210');
+    tree = render();
+
     const submitBtn = findElement(tree, (el) => el.props?.title === 'Submit Booking Request');
     await submitBtn.props.onPress();
-    tree = render();
 
-    let errorBanner = findElement(tree, (el) => el.props?.testID === 'booking-form-error');
-    expect(errorBanner).not.toBeNull();
-    expect(findElement(errorBanner, (el) => typeof el.props?.children === 'string' && el.props.children.includes('configured studio locations'))).not.toBeNull();
-
-    // 4. Tap option 1 (Whitefield Studio)
-    opt1.props.onPress();
-    tree = render();
-
-    // Display card appears with Whitefield Studio
-    const studioDisplay = findElement(tree, (el) => el.props?.testID === 'coach-studio-location-display');
-    expect(studioDisplay).not.toBeNull();
-    expect(findElement(studioDisplay, (el) => typeof el.props?.children === 'string' && el.props.children.includes('Whitefield Studio'))).not.toBeNull();
-
-    // Location summary preview updates to Whitefield Studio
-    const summaryAddress = findElement(tree, (el) => el.props?.testID === 'location-summary-address');
-    expect(summaryAddress.props?.children).toBe('Whitefield Studio');
+    expect(createBooking).toHaveBeenCalledWith('test_token', {
+      coachId: 'coach_001',
+      sport: 'boxing',
+      date: '2028-11-25',
+      startTime: '10:00',
+      endTime: '11:00',
+      venueType: 'ground',
+      trainingAddress: 'Indiranagar',
+      customerPhone: '+919876543210',
+    });
 
     cleanup();
   });

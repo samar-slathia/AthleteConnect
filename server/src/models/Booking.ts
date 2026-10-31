@@ -2,8 +2,10 @@ import mongoose, { Document, Schema, Model } from 'mongoose';
 import {
   COACH_DISCIPLINES,
   VENUE_TYPES,
+  ACTIVE_VENUE_TYPES,
   CoachDiscipline,
   VenueType,
+  ActiveVenueType,
 } from './CoachProfile';
 import { timeToMinutes, isValidCalendarDate, DEFAULT_TIMEZONE } from './CoachAvailability';
 import { UserRole } from './User';
@@ -11,8 +13,10 @@ import { UserRole } from './User';
 export {
   COACH_DISCIPLINES,
   VENUE_TYPES,
+  ACTIVE_VENUE_TYPES,
   CoachDiscipline,
   VenueType,
+  ActiveVenueType,
   isValidCalendarDate,
   DEFAULT_TIMEZONE,
 };

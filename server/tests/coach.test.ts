@@ -529,7 +529,7 @@ describe('Coach Profile Backend Tests', () => {
         disciplines: ['boxing', 'kickboxing'],
         specialties: ['Counter-Punching', 'Pad Drills'],
         sessionFormats: ['one_on_one'],
-        venueTypes: ['coach_home', 'ground'],
+        venueTypes: ['customer_home', 'ground'],
         hourlyRate: 1500,
         locations: ['Indiranagar', 'Whitefield'],
       };
@@ -548,6 +548,18 @@ describe('Coach Profile Backend Tests', () => {
       expect(res.body.profile.currency).toBe('INR');
       expect(res.body.profile.isPublished).toBe(false);
       expect(res.body.isComplete).toBe(true);
+    });
+
+    it('rejects profile update containing coach_home in venueTypes with HTTP 400', async () => {
+      const res = await request(app)
+        .put('/api/coach/profile/me')
+        .set('Authorization', `Bearer ${validCoachToken}`)
+        .send({
+          venueTypes: ['coach_home'],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Coach's Home is not an allowed venue type");
     });
 
     it('updates an existing profile partially, preserving omitted fields and allowing clearing', async () => {

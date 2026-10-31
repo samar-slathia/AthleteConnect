@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { CoachProfile } from '../models/CoachProfile';
 import { CoachAvailability } from '../models/CoachAvailability';
+import { getProfilePhotoReadStream } from '../services/gridfsService';
 
 /**
  * Public/Customer Coach Discovery
@@ -142,3 +143,64 @@ export async function getPublicCoachById(
     return next(error);
   }
 }
+
+/**
+ * Public Coach Profile Photo Retrieval
+ * GET /api/coaches/:id/photo
+ * Publicly stream the photo for active coach accounts with an uploaded photo.
+ * Never expose parent or individual account photos.
+ * Return 404 when no eligible coach photo exists.
+ */
+export async function getPublicCoachPhoto(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ error: 'Coach photo not found.' });
+    }
+
+    // Step 1: User must exist, have role 'coach', be active, and have a photoFileId
+    const coach = await User.findOne({ _id: id, role: 'coach', isActive: true });
+    if (!coach || !coach.photoFileId) {
+      return res.status(404).json({ error: 'Coach photo not found.' });
+    }
+
+    // Step 2: Stream photo from GridFS
+    const streamResult = await getProfilePhotoReadStream(coach.photoFileId);
+    if (!streamResult) {
+      return res.status(404).json({ error: 'Coach photo not found.' });
+    }
+
+    const etag = `"${streamResult.file._id.toString()}-${streamResult.file.uploadDate ? streamResult.file.uploadDate.getTime() : 0}"`;
+
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
+    const mimeType =
+      (streamResult.file.metadata as any)?.mimeType ||
+      streamResult.file.contentType ||
+      'image/jpeg';
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('ETag', etag);
+
+    streamResult.stream.on('error', (_streamErr) => {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'application/json');
+        res.status(500).json({ error: 'Failed to stream coach photo.' });
+      } else {
+        res.end();
+      }
+    });
+
+    streamResult.stream.pipe(res);
+  } catch (error) {
+    return next(error);
+  }
+}
+

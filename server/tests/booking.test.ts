@@ -408,7 +408,7 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
       date: validFutureDate,
       startTime: '09:00',
       endTime: '10:00',
-      venueType: 'coach_home',
+      venueType: 'customer_home',
       trainingAddress: '123 Main Road, Indiranagar, Bangalore',
       customerPhone: '+919876543210',
     };
@@ -430,11 +430,74 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
     // POST /api/bookings
     // -------------------------------------------------------------------------
     describe('POST /api/bookings', () => {
+      it('rejects booking submission with venueType: "coach_home" with HTTP 400', async () => {
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send({
+            ...validPayload,
+            venueType: 'coach_home',
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("Coach's Home is not an available training venue");
+      });
+
+      it('strips customer coordinates on Sports Ground (ground) bookings', async () => {
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue({
+          userId: coachId,
+          disciplines: ['boxing', 'kickboxing'],
+          venueTypes: ['customer_home', 'ground'],
+          hourlyRate: 1500,
+        } as any);
+
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+
+        let capturedSaveInput: any = null;
+        vi.spyOn(Booking.prototype, 'save').mockImplementation(async function (this: any) {
+          capturedSaveInput = this.toObject ? this.toObject() : this;
+          return {
+            _id: new mongoose.Types.ObjectId(),
+            customerId: parentId,
+            coachId: coachId,
+            sport: 'boxing',
+            date: validFutureDate,
+            startTime: '09:00',
+            endTime: '10:00',
+            startMinutes: 540,
+            endMinutes: 600,
+            durationMinutes: 60,
+            venueType: 'ground',
+            trainingAddress: 'Indiranagar Sports Ground',
+            customerPhone: validPayload.customerPhone,
+            locationCoordinates: undefined,
+            status: 'pending',
+            paymentStatus: 'unpaid',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        });
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send({
+            ...validPayload,
+            venueType: 'ground',
+            trainingAddress: 'Indiranagar Sports Ground',
+            coordinates: { latitude: 12.9716, longitude: 77.5946 },
+            locationCoordinates: { latitude: 12.9716, longitude: 77.5946 },
+          });
+
+        expect(res.status).toBe(201);
+        expect(capturedSaveInput.locationCoordinates).toBeUndefined();
+      });
+
       it('allows parent to create a booking request successfully', async () => {
         vi.spyOn(CoachProfile, 'findOne').mockResolvedValue({
           userId: coachId,
           disciplines: ['boxing', 'kickboxing'],
-          venueTypes: ['coach_home', 'ground'],
+          venueTypes: ['customer_home', 'ground'],
           hourlyRate: 1500,
         } as any);
 
@@ -451,7 +514,7 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
           startMinutes: 540,
           endMinutes: 600,
           durationMinutes: 60,
-          venueType: 'coach_home',
+          venueType: 'customer_home',
           trainingAddress: validPayload.trainingAddress,
           customerPhone: validPayload.customerPhone,
           status: 'pending',
@@ -736,6 +799,21 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
         expect(res.body.bookings[0].customerPhone).toBeUndefined();
         expect(res.body.bookings[0].trainingAddress).toBe('Secret Address');
         expect(res.body.bookings[0].status).toBe('pending');
+      });
+
+      it('sorts bookings by createdAt descending with deterministic _id fallback', async () => {
+        const sortSpy = vi.fn().mockResolvedValue([]);
+        vi.spyOn(Booking, 'find').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          sort: sortSpy,
+        } as any);
+
+        const res = await request(app)
+          .get('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`);
+
+        expect(res.status).toBe(200);
+        expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
       });
     });
 

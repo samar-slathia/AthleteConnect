@@ -34,11 +34,13 @@ import {
   BookingItem,
   CoachDiscipline,
   VenueType,
+  ActiveVenueType,
 } from '../../../services/bookingApi';
 import {
   detectDeviceLocation,
   BookingCoordinates,
   DetectedAddressComponents,
+  resolveGroundDestination,
 } from '../../../services/locationService';
 import { Button } from '../../../components/Button';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../../../theme/tokens';
@@ -50,12 +52,12 @@ export interface BookingRequestModalProps {
   onBookingCreated?: (newBooking: BookingItem) => void;
   token?: string | null;
   initialSport?: CoachDiscipline;
+  initialCoachId?: string;
 }
 
 const ALL_DISCIPLINES: CoachDiscipline[] = ['boxing', 'wushu', 'kickboxing'];
-const ALL_VENUES: { id: VenueType; label: string }[] = [
-  { id: 'coach_home', label: 'Coach Studio' },
-  { id: 'customer_home', label: 'Trainee Home' },
+const ALL_VENUES: { id: ActiveVenueType; label: string }[] = [
+  { id: 'customer_home', label: "Customer's Home" },
   { id: 'ground', label: 'Sports Ground' },
 ];
 
@@ -66,6 +68,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   onBookingCreated,
   token,
   initialSport,
+  initialCoachId,
 }) => {
   const [coaches, setCoaches] = useState<CoachDiscoveryItem[]>([]);
   const [isLoadingCoaches, setIsLoadingCoaches] = useState<boolean>(true);
@@ -77,7 +80,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('09:00');
   const [endTime, setEndTime] = useState<string>('10:00');
-  const [selectedVenue, setSelectedVenue] = useState<VenueType>('coach_home');
+  const [selectedVenue, setSelectedVenue] = useState<ActiveVenueType>('customer_home');
   const [trainingAddress, setTrainingAddress] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
 
@@ -104,6 +107,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const [locationDetectionError, setLocationDetectionError] = useState<string | null>(null);
 
   const locationRequestIdRef = useRef<number>(0);
+  const fetchCoachesRequestIdRef = useRef<number>(0);
+  const initialCoachIdRef = useRef<string | undefined>(initialCoachId);
+  const initialSportRef = useRef<CoachDiscipline | undefined>(initialSport);
   const userEditedAddressRef = useRef<boolean>(false);
 
   const [formError, setFormError] = useState<string | null>(null);
@@ -116,6 +122,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       userEditedAddressRef.current = false;
       setIsDetectingLocation(false);
       setDate(getKolkataTomorrowDateString());
+      setSelectedVenue('customer_home');
       setSelectedSport(initialSport || null);
       setSelectedCoachId('');
       setSelectedCoachLocation(null);
@@ -131,25 +138,81 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       setLocationDetectionMessage(null);
       setLocationDetectionError(null);
       setFormError(null);
+
+      initialCoachIdRef.current = initialCoachId;
+      initialSportRef.current = initialSport;
+
       fetchCoaches();
     }
-  }, [visible, initialSport]);
+  }, [visible, initialSport, initialCoachId]);
 
   const fetchCoaches = async () => {
+    const currentRequestId = ++fetchCoachesRequestIdRef.current;
     try {
       setIsLoadingCoaches(true);
       setLoadCoachesError(null);
       const list = await getPublicCoaches();
+      if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
       setCoaches(list);
+
+      const targetCoachId = initialCoachIdRef.current;
+      const targetSport = initialSportRef.current;
+
+      if (targetCoachId) {
+        const coach = list.find((c) => c._id === targetCoachId);
+        if (!coach) {
+          setSelectedCoachId('');
+          setFormError('The requested coach could not be found or is no longer available.');
+        } else if (targetSport) {
+          if (coach.profile?.disciplines?.includes(targetSport)) {
+            setSelectedCoachId(targetCoachId);
+            setSelectedSport(targetSport);
+            if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
+              const activeCoachVenues = coach.profile.venueTypes.filter(
+                (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+              );
+              if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                setSelectedVenue(activeCoachVenues[0]);
+              }
+            }
+          } else {
+            setSelectedCoachId('');
+            setFormError('The selected coach does not offer the chosen discipline.');
+          }
+        } else {
+          // targetSport was not supplied: determine a valid discipline offered by the selected coach
+          const disciplines = coach.profile?.disciplines || [];
+          if (disciplines.length > 0) {
+            setSelectedSport(disciplines[0]);
+            setSelectedCoachId(targetCoachId);
+            if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
+              const activeCoachVenues = coach.profile.venueTypes.filter(
+                (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+              );
+              if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                setSelectedVenue(activeCoachVenues[0]);
+              }
+            }
+          } else {
+            setSelectedCoachId('');
+            setFormError('The selected coach has not configured any disciplines.');
+          }
+        }
+      }
     } catch (err: any) {
+      if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
       setLoadCoachesError(err.message || 'Unable to load coaches.');
     } finally {
-      setIsLoadingCoaches(false);
+      if (currentRequestId === fetchCoachesRequestIdRef.current) {
+        setIsLoadingCoaches(false);
+      }
     }
   };
 
   const handleSelectSport = (sport: CoachDiscipline) => {
     if (sport === selectedSport) return;
+    initialCoachIdRef.current = undefined;
+    initialSportRef.current = sport;
     setSelectedSport(sport);
     setSelectedCoachId('');
     setSelectedCoachLocation(null);
@@ -157,18 +220,22 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   };
 
   const handleSelectCoach = (coachId: string) => {
+    initialCoachIdRef.current = undefined;
     setSelectedCoachId(coachId);
     setSelectedCoachLocation(null);
     setFormError(null);
     const chosen = coaches.find((c) => c._id === coachId);
     if (chosen?.profile?.venueTypes && chosen.profile.venueTypes.length > 0) {
-      if (!chosen.profile.venueTypes.includes(selectedVenue)) {
-        setSelectedVenue(chosen.profile.venueTypes[0]);
+      const activeCoachVenues = chosen.profile.venueTypes.filter(
+        (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+      );
+      if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+        setSelectedVenue(activeCoachVenues[0]);
       }
     }
   };
 
-  const handleSelectVenue = (venue: VenueType) => {
+  const handleSelectVenue = (venue: ActiveVenueType) => {
     locationRequestIdRef.current++;
     setIsDetectingLocation(false);
     setSelectedVenue(venue);
@@ -177,6 +244,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     setDetectedAddress(null);
     setLocationDetectionError(null);
     setLocationDetectionMessage(null);
+    setTrainingAddress('');
+    setGroundName('');
+    userEditedAddressRef.current = false;
   };
 
   const matchingCoaches = selectedSport
@@ -185,19 +255,19 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
   const selectedCoach = coaches.find((c) => c._id === selectedCoachId);
 
-  // Filter venue types offered by selected coach
+  // Filter venue types offered by selected coach (only active venues)
+  const coachVenues = (selectedCoach?.profile?.venueTypes || []).filter(
+    (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+  );
   const offeredVenues =
-    selectedCoach?.profile?.venueTypes && selectedCoach.profile.venueTypes.length > 0
-      ? ALL_VENUES.filter((v) => selectedCoach.profile!.venueTypes.includes(v.id))
+    coachVenues.length > 0
+      ? ALL_VENUES.filter((v) => coachVenues.includes(v.id))
       : ALL_VENUES;
 
   // Raw non-empty coach configured locations
   const rawCoachLocations = (selectedCoach?.profile?.locations || [])
     .map((l) => (typeof l === 'string' ? l.trim() : ''))
     .filter((l) => l.length > 0);
-
-  // Studio locations (all configured coach locations)
-  const coachStudioLocations = rawCoachLocations;
 
   // Ground locations (prioritizes ground/stadium/park/court/field/arena keywords, falls back to all configured locations)
   const groundMatches = rawCoachLocations.filter((loc) =>
@@ -207,9 +277,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
   // Applicable locations for the active venue
   const applicableLocations =
-    selectedVenue === 'coach_home'
-      ? coachStudioLocations
-      : selectedVenue === 'ground'
+    selectedVenue === 'ground'
       ? coachGroundLocations
       : [];
 
@@ -225,6 +293,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       : null;
 
   const handleDetectLocation = async () => {
+    if (selectedVenue !== 'customer_home') return;
     if (isDetectingLocation) return;
     const currentRequestId = ++locationRequestIdRef.current;
 
@@ -251,11 +320,6 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             .join(', ');
           if (localityPart) {
             setArea(localityPart);
-          }
-          setTrainingAddress(components.formattedAddress);
-        } else if (selectedVenue === 'ground') {
-          if (!groundName) {
-            setGroundName(components.formattedAddress);
           }
           setTrainingAddress(components.formattedAddress);
         }
@@ -294,9 +358,6 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
           if (selectedVenue === 'customer_home') {
             if (!area) setArea(result.suggestedAddress);
             if (!trainingAddress) setTrainingAddress(result.suggestedAddress);
-          } else if (selectedVenue === 'ground') {
-            if (!groundName) setGroundName(result.suggestedAddress);
-            if (!trainingAddress) setTrainingAddress(result.suggestedAddress);
           }
         }
       } else {
@@ -325,16 +386,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   };
 
   const getEffectiveLocation = (): { address: string; coordinates?: BookingCoordinates } => {
-    if (selectedVenue === 'coach_home') {
-      const address =
-        trainingAddress.trim() ||
-        activeCoachLocation ||
-        manualCoachAddress.trim();
-      return {
-        address: address || '',
-        coordinates: undefined,
-      };
-    } else if (selectedVenue === 'customer_home') {
+    if (selectedVenue === 'customer_home') {
       const parts = [
         houseNo.trim(),
         street.trim(),
@@ -352,14 +404,16 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
         coordinates: detectedCoordinates || undefined,
       };
     } else {
-      // ground
-      const address =
-        trainingAddress.trim() ||
-        activeCoachLocation ||
-        groundName.trim();
+      // ground (Sports Ground)
+      // Customer GPS coordinates are NEVER attached to a ground booking
+      const address = resolveGroundDestination({
+        manualAddress: trainingAddress,
+        groundName,
+        coachDesignatedLocation: activeCoachLocation,
+      });
       return {
         address,
-        coordinates: detectedCoordinates || undefined,
+        coordinates: undefined,
       };
     }
   };
@@ -432,31 +486,19 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     // 6. Address check
     const { address: finalAddress, coordinates: finalCoords } = getEffectiveLocation();
 
-    // Multiple coach locations selection check
-    if (
-      selectedVenue === 'coach_home' &&
-      coachStudioLocations.length > 1 &&
-      !activeCoachLocation &&
-      (!trainingAddress || trainingAddress.trim().length < 5)
-    ) {
-      setFormError('Please select one of the coach\'s configured studio locations.');
-      return;
-    }
-
+    // Multiple coach ground locations selection check
     if (
       selectedVenue === 'ground' &&
       coachGroundLocations.length > 1 &&
       !activeCoachLocation &&
-      (!trainingAddress || trainingAddress.trim().length < 5)
+      (!finalAddress || finalAddress.trim().length < 5)
     ) {
       setFormError('Please select one of the coach\'s configured ground locations.');
       return;
     }
 
     if (!finalAddress || finalAddress.trim().length < 5) {
-      if (selectedVenue === 'coach_home') {
-        setFormError('Please select a coach with a configured studio or enter a studio training address (min 5 characters).');
-      } else if (selectedVenue === 'customer_home') {
+      if (selectedVenue === 'customer_home') {
         setFormError('Please provide a complete training address (min 5 characters).');
       } else {
         setFormError('Please provide a sports ground or facility training address (min 5 characters).');
@@ -482,7 +524,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
         trainingAddress: finalAddress.trim(),
         customerPhone: customerPhone.trim(),
       };
-      if (finalCoords) {
+      if (selectedVenue === 'customer_home' && finalCoords) {
         payload.coordinates = finalCoords;
         payload.locationCoordinates = finalCoords;
       }
@@ -585,6 +627,8 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                       key={c._id}
                       style={[styles.coachChip, isSelected && styles.coachChipSelected]}
                       onPress={() => handleSelectCoach(c._id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
                       testID={`coach-chip-${c._id}`}
                     >
                       <Text style={[styles.coachChipName, isSelected && styles.coachChipNameSelected]}>
@@ -666,92 +710,6 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             {/* 5. Address & Contact */}
             <Text style={styles.inputLabel}>5. LOCATION & CONTACT</Text>
 
-            {selectedVenue === 'coach_home' && (
-              <View style={styles.venueSection}>
-                {coachStudioLocations.length === 0 ? (
-                  <View style={styles.warningNotice} testID="coach-studio-missing-notice">
-                    <AlertCircle size={16} color="#B45309" />
-                    <Text style={styles.warningNoticeText}>
-                      This coach has not configured any studio locations. Please enter the agreed studio address below.
-                    </Text>
-                  </View>
-                ) : coachStudioLocations.length === 1 ? (
-                  <View style={styles.configuredLocationCard} testID="coach-studio-location-display">
-                    <View style={styles.configuredLocationHeader}>
-                      <MapPin size={16} color={COLORS.navy} />
-                      <Text style={styles.configuredLocationTitle}>
-                        {selectedCoach?.name ? `${selectedCoach.name}'s Studio` : 'Coach Studio'}
-                      </Text>
-                    </View>
-                    <Text style={styles.configuredLocationAddress}>{activeCoachLocation}</Text>
-                    <Text style={styles.configuredLocationSub}>
-                      Sessions at the coach's facility take place at their designated studio. Trainee home address is not required.
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.locationSelectorContainer} testID="coach-studio-location-selector">
-                    <Text style={styles.selectorLabel}>Select Studio Location:</Text>
-                    <View style={styles.rowWrap}>
-                      {coachStudioLocations.map((loc, idx) => {
-                        const isSelected = activeCoachLocation === loc;
-                        return (
-                          <TouchableOpacity
-                            key={loc}
-                            style={[
-                              styles.locationOptionPill,
-                              isSelected && styles.locationOptionPillSelected,
-                            ]}
-                            onPress={() => setSelectedCoachLocation(loc)}
-                            testID={`coach-location-option-${idx}`}
-                          >
-                            <MapPin size={12} color={isSelected ? COLORS.navy : COLORS.textSecondary} />
-                            <Text
-                              style={[
-                                styles.locationOptionText,
-                                isSelected && styles.locationOptionTextSelected,
-                              ]}
-                            >
-                              {loc}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                    {activeCoachLocation ? (
-                      <View style={styles.configuredLocationCard} testID="coach-studio-location-display">
-                        <View style={styles.configuredLocationHeader}>
-                          <MapPin size={16} color={COLORS.navy} />
-                          <Text style={styles.configuredLocationTitle}>Selected Studio</Text>
-                        </View>
-                        <Text style={styles.configuredLocationAddress}>{activeCoachLocation}</Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.subtleMuted} testID="prompt-select-coach-location">
-                        Please select a studio location from the options above.
-                      </Text>
-                    )}
-                  </View>
-                )}
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.fieldSubLabel}>
-                    {coachStudioLocations.length > 0 ? 'Studio Address / Notes (Optional)' : 'Studio Address *'}
-                  </Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={trainingAddress}
-                    onChangeText={(val) => {
-                      userEditedAddressRef.current = true;
-                      setTrainingAddress(val);
-                    }}
-                    placeholder={activeCoachLocation || "e.g. FitZone Arena, Indiranagar"}
-                    placeholderTextColor={COLORS.textMuted}
-                    testID="input-booking-address"
-                  />
-                </View>
-              </View>
-            )}
-
             {selectedVenue === 'customer_home' && (
               <View style={styles.venueSection}>
                 <View style={styles.privacyNoticeBanner} testID="trainee-home-address-notice">
@@ -762,7 +720,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 </View>
 
                 <View style={styles.subLabelRow}>
-                  <Text style={styles.fieldSubLabel}>Trainee Home Address</Text>
+                  <Text style={styles.fieldSubLabel}>Customer's Home Address</Text>
                   <TouchableOpacity
                     style={styles.detectLocationBtn}
                     onPress={handleDetectLocation}
@@ -880,55 +838,12 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
             {selectedVenue === 'ground' && (
               <View style={styles.venueSection}>
-                <View style={styles.subLabelRow}>
-                  <Text style={styles.fieldSubLabel}>Sports Ground / Facility</Text>
-                  <TouchableOpacity
-                    style={styles.detectLocationBtn}
-                    onPress={handleDetectLocation}
-                    disabled={isDetectingLocation}
-                    testID="button-detect-location"
-                  >
-                    <Locate size={14} color={COLORS.navy} />
-                    <Text style={styles.detectLocationBtnText}>
-                      {isDetectingLocation ? 'Detecting...' : 'Detect My Location'}
-                    </Text>
-                  </TouchableOpacity>
+                <View style={styles.groundNoticeBanner} testID="sports-ground-notice">
+                  <MapPin size={16} color={COLORS.navy} />
+                  <Text style={styles.groundNoticeText}>
+                    Sessions take place at a coach-designated sports ground or training facility. Your coach will meet you at the ground.
+                  </Text>
                 </View>
-
-                {isDetectingLocation ? (
-                  <View style={styles.detectNoticeRow} testID="location-detecting-indicator">
-                    <ActivityIndicator size="small" color={COLORS.navy} />
-                    <Text style={styles.detectNoticeText}>Acquiring GPS location...</Text>
-                  </View>
-                ) : null}
-
-                {locationDetectionError ? (
-                  <View style={styles.detectNoticeError} testID="location-detection-error">
-                    <AlertCircle size={14} color="#DC2626" />
-                    <Text style={styles.detectNoticeErrorText}>{locationDetectionError}</Text>
-                  </View>
-                ) : null}
-
-                {detectedCoordinates ? (
-                  <View style={styles.detectNoticeSuccess} testID="location-detected-coordinates">
-                    <CheckCircle size={14} color="#047857" />
-                    <Text style={styles.detectNoticeSuccessText}>
-                      {`GPS attached: ${detectedCoordinates.latitude.toFixed(4)}, ${detectedCoordinates.longitude.toFixed(4)}`}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {detectedAddress ? (
-                  <View style={styles.detectedAddressCard} testID="location-detected-address-card">
-                    <View style={styles.detectedAddressHeader}>
-                      <MapPin size={14} color={COLORS.navy} />
-                      <Text style={styles.detectedAddressLabel}>Detected address — please verify</Text>
-                    </View>
-                    <Text style={styles.detectedAddressText} testID="location-detected-address-text">
-                      {detectedAddress}
-                    </Text>
-                  </View>
-                ) : null}
 
                 {coachGroundLocations.length === 0 ? (
                   <View style={styles.warningNotice} testID="coach-ground-missing-notice">
@@ -991,8 +906,23 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 )}
 
                 <View style={styles.inputGroup}>
+                  <Text style={styles.subFieldLabel}>Ground Name / Facility (Optional)</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={groundName}
+                    onChangeText={(val) => {
+                      userEditedAddressRef.current = true;
+                      setGroundName(val);
+                    }}
+                    placeholder="e.g. MA Stadium"
+                    placeholderTextColor={COLORS.textMuted}
+                    testID="input-ground-name"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
                   <Text style={styles.subFieldLabel}>
-                    {coachGroundLocations.length > 0 ? 'Ground Name & Address (Optional)' : 'Ground Name & Address *'}
+                    {coachGroundLocations.length > 0 ? 'Specific Ground Address (Optional override)' : 'Specific Ground Address *'}
                   </Text>
                   <TextInput
                     style={styles.textInput}
@@ -1001,7 +931,11 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                       userEditedAddressRef.current = true;
                       setTrainingAddress(val);
                     }}
-                    placeholder={activeCoachLocation || "e.g. Kanteerava Outdoor Stadium, Gate 3"}
+                    placeholder={
+                      activeCoachLocation
+                        ? `e.g. Parade Ground Road, ${activeCoachLocation}`
+                        : "e.g. Parade Ground Road, Jammu"
+                    }
                     placeholderTextColor={COLORS.textMuted}
                     testID="input-booking-address"
                   />
@@ -1415,6 +1349,24 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   privacyNoticeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.navy,
+    flex: 1,
+    lineHeight: 16,
+  },
+  groundNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: RADII.sm,
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  groundNoticeText: {
     ...TYPOGRAPHY.caption,
     fontSize: 11,
     color: COLORS.navy,

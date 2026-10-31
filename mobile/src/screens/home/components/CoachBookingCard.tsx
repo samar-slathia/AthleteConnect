@@ -15,9 +15,9 @@ export interface CoachBookingCardProps {
 }
 
 const VENUE_LABELS: Record<string, string> = {
-  coach_home: 'Coach Home / Studio',
-  customer_home: 'Trainee Home',
-  ground: 'Sports Ground / Facility',
+  customer_home: "Customer's Home",
+  ground: 'Sports Ground',
+  coach_home: "Coach's Home (Legacy)",
 };
 
 export const CoachBookingCard: React.FC<CoachBookingCardProps> = ({
@@ -95,6 +95,15 @@ export const CoachBookingCard: React.FC<CoachBookingCardProps> = ({
     } catch {
       setCallError('Unable to open phone dialer.');
     }
+  };
+
+  const handleOpenMaps = () => {
+    const isGround = booking.venueType === 'ground';
+    openInGoogleMaps({
+      coordinates: isGround ? undefined : (booking.coordinates || booking.locationCoordinates),
+      address: booking.trainingAddress,
+      venueType: booking.venueType,
+    });
   };
 
   const isPending = booking.status === 'pending';
@@ -180,9 +189,20 @@ export const CoachBookingCard: React.FC<CoachBookingCardProps> = ({
         </View>
       ) : null}
 
-      {booking.status === 'cancelled' && booking.cancellationReason ? (
-        <View style={styles.noteBox}>
-          <Text style={styles.noteLabel}>Cancellation Reason: {booking.cancellationReason}</Text>
+      {booking.status === 'cancelled' ? (
+        <View style={styles.noteBox} testID={`cancellation-note-${booking._id}`}>
+          <Text style={styles.noteLabel} testID={`cancellation-actor-${booking._id}`}>
+            {booking.cancelledBy === 'coach'
+              ? 'Cancelled by You'
+              : booking.cancelledBy === 'customer'
+              ? 'Cancelled by Trainee'
+              : 'Cancelled'}
+          </Text>
+          {booking.cancellationReason ? (
+            <Text style={styles.noteReason} testID={`cancellation-reason-${booking._id}`}>
+              Reason: {booking.cancellationReason}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -223,12 +243,7 @@ export const CoachBookingCard: React.FC<CoachBookingCardProps> = ({
         {hasValidDestination ? (
           <TouchableOpacity
             style={styles.mapsButton}
-            onPress={() =>
-              openInGoogleMaps({
-                coordinates: booking.coordinates || booking.locationCoordinates,
-                address: booking.trainingAddress,
-              })
-            }
+            onPress={handleOpenMaps}
             accessibilityRole="button"
             accessibilityLabel={`Open directions in Google Maps for ${booking.customerName || 'trainee'}`}
             testID={`button-maps-${booking._id}`}
@@ -370,6 +385,12 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.caption,
     fontSize: 11.5,
     color: '#991B1B',
+  },
+  noteReason: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11.5,
+    color: '#991B1B',
+    marginTop: 2,
   },
   actionContainer: {
     marginTop: SPACING.sm,

@@ -4,6 +4,7 @@ import { Target, Plus } from 'lucide-react-native';
 import { UserProfile } from '../../services/authApi';
 import { AuthContext } from '../../context/AuthContext';
 import { getCustomerBookings, cancelBooking, BookingItem } from '../../services/bookingApi';
+import { groupBookingsForCustomer } from '../../utils/bookingSections';
 import { DisciplineCard } from './components/DisciplineCard';
 import { OnboardingStepCard } from './components/OnboardingStepCard';
 import { EmptyStateSection } from './components/EmptyStateSection';
@@ -66,7 +67,11 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
     try {
       await cancelBooking(effectiveToken, bookingId);
       setBookings((prev) =>
-        prev.map((b) => (b._id === bookingId ? { ...b, status: 'cancelled' as const } : b))
+        prev.map((b) =>
+          b._id === bookingId
+            ? { ...b, status: 'cancelled' as const, cancelledBy: 'customer' as const }
+            : b
+        )
       );
       await loadBookings();
     } catch (err: any) {
@@ -243,14 +248,28 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
               <Text style={styles.cancelErrorText}>{cancelError}</Text>
             </View>
           ) : null}
-          {bookings.map((booking) => (
-            <CustomerBookingCard
-              key={booking._id}
-              booking={booking}
-              onCancel={handleCancelBooking}
-              isCancelling={cancellingBookingId === booking._id}
-              onOpenChat={(b) => setActiveChatBooking(b)}
-            />
+          {groupBookingsForCustomer(bookings).map((section) => (
+            <View
+              key={section.key}
+              style={styles.bookingGroup}
+              testID={`customer-booking-section-${section.key}`}
+            >
+              <Text
+                style={styles.groupHeader}
+                testID={`customer-section-header-${section.key}`}
+              >
+                {`${section.title.toUpperCase()} (${section.data.length})`}
+              </Text>
+              {section.data.map((booking) => (
+                <CustomerBookingCard
+                  key={booking._id}
+                  booking={booking}
+                  onCancel={handleCancelBooking}
+                  isCancelling={cancellingBookingId === booking._id}
+                  onOpenChat={(b) => setActiveChatBooking(b)}
+                />
+              ))}
+            </View>
           ))}
           <View style={styles.emptyActionRow}>
             <Button
@@ -385,6 +404,18 @@ const styles = StyleSheet.create({
   },
   bookingsContainer: {
     gap: SPACING.xs,
+  },
+  bookingGroup: {
+    marginBottom: SPACING.sm,
+  },
+  groupHeader: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.navy,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 4,
   },
   emptyActionRow: {
     marginTop: SPACING.sm,

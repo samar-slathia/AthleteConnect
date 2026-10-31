@@ -1,10 +1,10 @@
 import { getApiBaseUrl, API_ENDPOINTS } from '../config/api';
 import { AuthApiError } from './authApi';
-import { CoachDiscipline, VenueType } from './coachApi';
+import { CoachDiscipline, VenueType, ActiveVenueType, ACTIVE_VENUE_TYPES } from './coachApi';
 import { isValidCalendarDate } from './availabilityApi';
 
-export type { CoachDiscipline, VenueType };
-export { isValidCalendarDate };
+export type { CoachDiscipline, VenueType, ActiveVenueType };
+export { isValidCalendarDate, ACTIVE_VENUE_TYPES };
 
 export type BookingStatus =
   | 'pending'

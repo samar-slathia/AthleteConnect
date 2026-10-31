@@ -72,4 +72,7 @@ export const API_ENDPOINTS = {
   COACH_AVAILABILITY: '/api/coach/availability/me',
   BOOKINGS: '/api/bookings',
   COACHES: '/api/coaches',
+  USER_PHOTO: '/api/users/me/photo',
+  COACH_PHOTO: (id: string) => `/api/coaches/${id}/photo`,
 } as const;
+

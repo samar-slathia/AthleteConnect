@@ -7,6 +7,7 @@ import { ParentHomeView } from '../../screens/home/ParentHomeView';
 import { IndividualHomeView } from '../../screens/home/IndividualHomeView';
 import { CoachHomeView } from '../../screens/home/CoachHomeView';
 import { UserProfileView } from '../../screens/profile/UserProfileView';
+import { CoachesDirectoryView } from '../../screens/coaches/CoachesDirectoryView';
 import { AuthContext, AuthContextType } from '../../context/AuthContext';
 import { UserProfile } from '../../services/authApi';
 
@@ -160,15 +161,26 @@ describe('Phase 3 Role-Specific Navigation & Persistent Bottom Bar', () => {
       cleanup();
     });
 
-    it('Discover tab renders ParentHomeView in mode="discover"', () => {
+    it('Coaches tab renders CoachesDirectoryView for parent', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'coaches' }),
+        { user: parentUser }
+      );
+
+      const coachesView = findElement(tree, (el) => el.type === CoachesDirectoryView);
+      expect(coachesView).not.toBeNull();
+
+      cleanup();
+    });
+
+    it('safely normalizes legacy discover tab to coaches for parent', () => {
       const { tree, cleanup } = renderWithAuth(
         React.createElement(HomeScreen, { initialTab: 'discover' }),
         { user: parentUser }
       );
 
-      const parentDiscover = findElement(tree, (el) => el.type === ParentHomeView);
-      expect(parentDiscover).not.toBeNull();
-      expect(parentDiscover.props.mode).toBe('discover');
+      const coachesView = findElement(tree, (el) => el.type === CoachesDirectoryView);
+      expect(coachesView).not.toBeNull();
 
       cleanup();
     });
@@ -240,15 +252,26 @@ describe('Phase 3 Role-Specific Navigation & Persistent Bottom Bar', () => {
       cleanup();
     });
 
-    it('Discover tab renders IndividualHomeView in mode="discover"', () => {
+    it('Coaches tab renders CoachesDirectoryView for individual', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'coaches' }),
+        { user: individualUser }
+      );
+
+      const coachesView = findElement(tree, (el) => el.type === CoachesDirectoryView);
+      expect(coachesView).not.toBeNull();
+
+      cleanup();
+    });
+
+    it('safely normalizes legacy discover tab to coaches for individual', () => {
       const { tree, cleanup } = renderWithAuth(
         React.createElement(HomeScreen, { initialTab: 'discover' }),
         { user: individualUser }
       );
 
-      const indDiscover = findElement(tree, (el) => el.type === IndividualHomeView);
-      expect(indDiscover).not.toBeNull();
-      expect(indDiscover.props.mode).toBe('discover');
+      const coachesView = findElement(tree, (el) => el.type === CoachesDirectoryView);
+      expect(coachesView).not.toBeNull();
 
       cleanup();
     });
@@ -320,6 +343,19 @@ describe('Phase 3 Role-Specific Navigation & Persistent Bottom Bar', () => {
       cleanup();
     });
 
+    it('Requests tab renders CoachHomeView in mode="requests"', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'requests' }),
+        { user: coachUser }
+      );
+
+      const coachRequests = findElement(tree, (el) => el.type === CoachHomeView);
+      expect(coachRequests).not.toBeNull();
+      expect(coachRequests.props.mode).toBe('requests');
+
+      cleanup();
+    });
+
     it('Sessions tab renders CoachHomeView in mode="sessions"', () => {
       const { tree, cleanup } = renderWithAuth(
         React.createElement(HomeScreen, { initialTab: 'sessions' }),
@@ -361,13 +397,54 @@ describe('Phase 3 Role-Specific Navigation & Persistent Bottom Bar', () => {
       cleanup();
     });
 
-    it('normalizes unauthorized customer tab back to home for coach', () => {
+    it('normalizes unauthorized customer coaches tab back to home for coach', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'coaches' }),
+        { user: coachUser }
+      );
+
+      // Must fall back to home tab for coach
+      const coachHome = findElement(tree, (el) => el.type === CoachHomeView);
+      expect(coachHome).not.toBeNull();
+      expect(coachHome.props.mode).toBe('home');
+
+      cleanup();
+    });
+
+    it('normalizes unauthorized requests tab back to home for parent customer', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'requests' }),
+        { user: parentUser }
+      );
+
+      // Must fall back to home tab for parent
+      const parentHome = findElement(tree, (el) => el.type === ParentHomeView);
+      expect(parentHome).not.toBeNull();
+      expect(parentHome.props.mode).toBe('home');
+
+      cleanup();
+    });
+
+    it('normalizes unauthorized requests tab back to home for individual customer', () => {
+      const { tree, cleanup } = renderWithAuth(
+        React.createElement(HomeScreen, { initialTab: 'requests' }),
+        { user: individualUser }
+      );
+
+      // Must fall back to home tab for individual
+      const indHome = findElement(tree, (el) => el.type === IndividualHomeView);
+      expect(indHome).not.toBeNull();
+      expect(indHome.props.mode).toBe('home');
+
+      cleanup();
+    });
+
+    it('normalizes legacy discover tab back to home for coach', () => {
       const { tree, cleanup } = renderWithAuth(
         React.createElement(HomeScreen, { initialTab: 'discover' }),
         { user: coachUser }
       );
 
-      // Must fall back to home tab for coach
       const coachHome = findElement(tree, (el) => el.type === CoachHomeView);
       expect(coachHome).not.toBeNull();
       expect(coachHome.props.mode).toBe('home');

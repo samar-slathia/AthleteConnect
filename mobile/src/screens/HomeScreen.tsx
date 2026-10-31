@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Zap } from 'lucide-react-native';
@@ -7,12 +7,14 @@ import { ROLES } from '../data/roles';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { Badge } from '../components/Badge';
-import { BottomNavBar } from '../navigation/BottomNavBar';
+import { BottomNavBar, NavTab } from '../navigation/BottomNavBar';
 import { ParentHomeView } from './home/ParentHomeView';
 import { IndividualHomeView } from './home/IndividualHomeView';
 import { CoachHomeView } from './home/CoachHomeView';
 import { CoachAvailabilityScreen } from './CoachAvailabilityScreen';
 import { UserProfileView } from './profile/UserProfileView';
+import { CoachesDirectoryView } from './coaches/CoachesDirectoryView';
+import { getCoachBookings, BookingItem } from '../services/bookingApi';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
 export type HomeScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -25,10 +27,43 @@ export interface HomeScreenProps {
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => {
   const insets = useSafeAreaInsets();
-  const { user, logout, isLoading } = useAuth();
+  const { user, token, logout, isLoading } = useAuth();
 
   const startTab = route?.params?.initialTab || initialTab || 'home';
   const [activeTab, setActiveTab] = useState<string>(startTab);
+
+  // Shared state for coach bookings and pending count
+  const [coachBookings, setCoachBookings] = useState<BookingItem[] | null>(null);
+  const [isLoadingCoachBookings, setIsLoadingCoachBookings] = useState<boolean>(false);
+  const [coachBookingsError, setCoachBookingsError] = useState<string | null>(null);
+  const [pendingCountFromChild, setPendingCountFromChild] = useState<number>(0);
+
+  const loadCoachBookings = useCallback(async () => {
+    if (!token || user?.role !== 'coach') return;
+    setIsLoadingCoachBookings(true);
+    setCoachBookingsError(null);
+    try {
+      const data = await getCoachBookings(token);
+      setCoachBookings(data);
+    } catch (err: any) {
+      setCoachBookingsError(err?.message || 'Failed to load trainee requests.');
+    } finally {
+      setIsLoadingCoachBookings(false);
+    }
+  }, [token, user?.role]);
+
+  useEffect(() => {
+    if (user?.role === 'coach' && token) {
+      loadCoachBookings();
+    }
+  }, [user?.role, token, loadCoachBookings]);
+
+  const pendingCount =
+    user?.role === 'coach'
+      ? coachBookings !== null
+        ? coachBookings.filter((b) => b.status === 'pending').length
+        : pendingCountFromChild
+      : 0;
 
   if (!user) {
     return (
@@ -40,10 +75,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
 
   const roleInfo = ROLES.find((r) => r.id === user.role);
 
-  const coachTabs = ['home', 'sessions', 'availability', 'profile'];
-  const customerTabs = ['home', 'discover', 'bookings', 'profile'];
+  const coachTabs: NavTab[] = ['home', 'requests', 'sessions', 'availability', 'profile'];
+  const customerTabs: NavTab[] = ['home', 'coaches', 'bookings', 'profile'];
+  const normalizedTab = activeTab === 'discover' ? 'coaches' : activeTab;
   const validTabs = user.role === 'coach' ? coachTabs : customerTabs;
-  const currentTab = validTabs.includes(activeTab) ? activeTab : 'home';
+  const currentTab = validTabs.includes(normalizedTab as NavTab) ? normalizedTab : 'home';
 
   const handleLogout = async () => {
     try {
@@ -63,24 +99,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
           </View>
           <Text style={styles.brandName}>AthleteConnect</Text>
         </View>
-        <Badge
-          label={
-            currentTab === 'profile'
-              ? 'Profile'
-              : currentTab === 'discover'
-              ? 'Discover'
-              : currentTab === 'bookings'
-              ? 'Bookings'
-              : currentTab === 'sessions'
-              ? 'Sessions'
-              : currentTab === 'availability'
-              ? 'Availability'
-              : roleInfo
-              ? roleInfo.title
-              : 'Authenticated'
-          }
-          variant="lime"
-        />
+        <View testID="top-bar-badge">
+          <Badge
+            label={
+              currentTab === 'profile'
+                ? 'Profile'
+                : currentTab === 'coaches'
+                ? 'Coaches'
+                : currentTab === 'bookings'
+                ? 'Bookings'
+                : currentTab === 'requests'
+                ? 'Booking Requests'
+                : currentTab === 'sessions'
+                ? 'Sessions'
+                : currentTab === 'availability'
+                ? 'Availability'
+                : roleInfo
+                ? roleInfo.title
+                : 'Authenticated'
+            }
+            variant="lime"
+          />
+        </View>
       </View>
 
       {/* Main Tab Content Area */}
@@ -106,24 +146,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
             ) : user.role === 'individual' ? (
               <IndividualHomeView user={user} mode="home" />
             ) : user.role === 'coach' ? (
-              <CoachHomeView user={user} mode="home" onNavigateToTab={setActiveTab} />
+              <CoachHomeView
+                user={user}
+                mode="home"
+                onNavigateToTab={setActiveTab}
+                bookings={coachBookings ?? undefined}
+                isLoading={isLoadingCoachBookings}
+                error={coachBookingsError}
+                onBookingsChange={setCoachBookings}
+                onRefreshBookings={loadCoachBookings}
+                onPendingCountChange={setPendingCountFromChild}
+              />
             ) : null}
           </ScrollView>
-        ) : currentTab === 'discover' ? (
-          <ScrollView
-            style={styles.mainScroll}
-            contentContainerStyle={[
-              styles.scrollContent,
-              { paddingBottom: insets.bottom + 72 },
-            ]}
-            showsVerticalScrollIndicator={false}
+        ) : currentTab === 'coaches' ? (
+          <View
+            style={[styles.fullScreenTab, { paddingBottom: insets.bottom + 64 }]}
+            testID="coaches-tab-view"
           >
-            {user.role === 'parent' ? (
-              <ParentHomeView user={user} mode="discover" />
-            ) : user.role === 'individual' ? (
-              <IndividualHomeView user={user} mode="discover" />
-            ) : null}
-          </ScrollView>
+            <CoachesDirectoryView
+              onBookingSuccess={() => {
+                setActiveTab('bookings');
+              }}
+            />
+          </View>
         ) : currentTab === 'bookings' ? (
           <ScrollView
             style={styles.mainScroll}
@@ -139,6 +185,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
               <IndividualHomeView user={user} mode="bookings" />
             ) : null}
           </ScrollView>
+        ) : currentTab === 'requests' ? (
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 72 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {user.role === 'coach' ? (
+              <CoachHomeView
+                user={user}
+                mode="requests"
+                onNavigateToTab={setActiveTab}
+                bookings={coachBookings ?? undefined}
+                isLoading={isLoadingCoachBookings}
+                error={coachBookingsError}
+                onBookingsChange={setCoachBookings}
+                onRefreshBookings={loadCoachBookings}
+                onPendingCountChange={setPendingCountFromChild}
+              />
+            ) : null}
+          </ScrollView>
         ) : currentTab === 'sessions' ? (
           <ScrollView
             style={styles.mainScroll}
@@ -149,7 +218,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
             showsVerticalScrollIndicator={false}
           >
             {user.role === 'coach' ? (
-              <CoachHomeView user={user} mode="sessions" onNavigateToTab={setActiveTab} />
+              <CoachHomeView
+                user={user}
+                mode="sessions"
+                onNavigateToTab={setActiveTab}
+                bookings={coachBookings ?? undefined}
+                isLoading={isLoadingCoachBookings}
+                error={coachBookingsError}
+                onBookingsChange={setCoachBookings}
+                onRefreshBookings={loadCoachBookings}
+                onPendingCountChange={setPendingCountFromChild}
+              />
             ) : null}
           </ScrollView>
         ) : currentTab === 'availability' ? (
@@ -169,6 +248,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
         activeTab={currentTab}
         onTabChange={setActiveTab}
         role={user.role}
+        badges={
+          user.role === 'coach' && pendingCount > 0
+            ? { requests: pendingCount > 9 ? '9+' : pendingCount }
+            : undefined
+        }
       />
     </View>
   );
