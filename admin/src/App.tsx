@@ -1,36 +1,62 @@
 import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import type { NavigationItemKey } from './theme/tokens';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
+import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
-import { CoachVerificationPage } from './pages/CoachVerificationPage';
 import { UsersPage } from './pages/UsersPage';
+import { CoachesPage } from './pages/CoachesPage';
 import { BookingsPage } from './pages/BookingsPage';
-import { FinancePage } from './pages/FinancePage';
+import { ReportsPage } from './pages/ReportsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import type { NavigationItemKey } from './theme/tokens';
+import { Zap } from 'lucide-react';
 
-export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<NavigationItemKey>('overview');
+const AdminAppContent: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  const [currentTab, setCurrentTab] = useState<NavigationItemKey>('dashboard');
 
   const pageTitles: Record<NavigationItemKey, string> = {
-    overview: 'Operations Overview',
-    coaches: 'Coach Verification & Compliance',
+    dashboard: 'Operations Overview',
     users: 'User Account Management',
+    coaches: 'Coach Verification & Compliance',
     bookings: 'Training Sessions & Bookings',
-    finance: 'Financial Operations & Payouts',
+    reports: 'Operational Reports & Analytics',
+    settings: 'Platform Settings & Governance',
   };
+
+  if (isLoading) {
+    return (
+      <div className="admin-loading-screen" aria-label="Loading admin portal">
+        <div className="loading-card">
+          <div className="login-brand-icon spin-subtle">
+            <Zap size={32} fill="#101C2C" stroke="#101C2C" />
+          </div>
+          <div className="loading-text">Verifying administrative session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const renderContent = () => {
     switch (currentTab) {
-      case 'overview':
+      case 'dashboard':
         return <OverviewPage />;
-      case 'coaches':
-        return <CoachVerificationPage />;
       case 'users':
         return <UsersPage />;
+      case 'coaches':
+        return <CoachesPage />;
       case 'bookings':
         return <BookingsPage />;
-      case 'finance':
-        return <FinancePage />;
+      case 'reports':
+        return <ReportsPage />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <OverviewPage />;
     }
@@ -40,12 +66,20 @@ export const App: React.FC = () => {
     <div className="admin-layout">
       <Sidebar currentTab={currentTab} onSelectTab={setCurrentTab} />
       <main className="admin-main">
-        <Topbar title={pageTitles[currentTab]} />
+        <Topbar title={pageTitles[currentTab] || 'Admin Portal'} />
         <div className="admin-content">
           {renderContent()}
         </div>
       </main>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AdminAppContent />
+    </AuthProvider>
   );
 };
 

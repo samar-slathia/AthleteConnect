@@ -17,6 +17,10 @@ export const TOKENS = {
     successBg: '#E8F6F0',
     warning: '#B45309',
     warningBg: '#FEF3C7',
+    danger: '#DC2626',
+    dangerBg: '#FEE2E2',
+    info: '#2563EB',
+    infoBg: '#DBEAFE',
   },
   fonts: {
     family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -29,4 +33,10 @@ export const TOKENS = {
   },
 } as const;
 
-export type NavigationItemKey = 'overview' | 'coaches' | 'users' | 'bookings' | 'finance';
+export type NavigationItemKey =
+  | 'dashboard'
+  | 'users'
+  | 'coaches'
+  | 'bookings'
+  | 'reports'
+  | 'settings';

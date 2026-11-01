@@ -1,10 +1,11 @@
 import React from 'react';
 import { 
   LayoutDashboard, 
-  ShieldCheck, 
   Users, 
+  ShieldCheck, 
   CalendarDays, 
-  CreditCard,
+  BarChart3, 
+  Settings,
   Zap
 } from 'lucide-react';
 import type { NavigationItemKey } from '../theme/tokens';
@@ -22,22 +23,23 @@ interface NavItemConfig {
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
   const navItems: NavItemConfig[] = [
-    { key: 'overview', label: 'Overview', icon: <LayoutDashboard size={18} /> },
-    { key: 'coaches', label: 'Coach Verification', icon: <ShieldCheck size={18} /> },
+    { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { key: 'users', label: 'Users', icon: <Users size={18} /> },
+    { key: 'coaches', label: 'Coaches', icon: <ShieldCheck size={18} /> },
     { key: 'bookings', label: 'Bookings', icon: <CalendarDays size={18} /> },
-    { key: 'finance', label: 'Finance', icon: <CreditCard size={18} /> },
+    { key: 'reports', label: 'Reports', icon: <BarChart3 size={18} /> },
+    { key: 'settings', label: 'Settings', icon: <Settings size={18} /> },
   ];
 
   return (
     <aside className="admin-sidebar" aria-label="Admin Navigation">
       <div className="sidebar-brand">
         <div className="brand-icon-wrapper" aria-hidden="true">
-          <Zap size={22} fill="#101C2C" />
+          <Zap size={22} fill="#101C2C" stroke="#101C2C" />
         </div>
         <div>
           <div className="brand-title">AthleteConnect</div>
-          <span className="brand-badge">Admin Shell</span>
+          <span className="brand-badge">Admin Portal</span>
         </div>
       </div>
 
@@ -60,9 +62,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
       </nav>
 
       <div className="sidebar-footer">
-        <div><strong>AthleteConnect v0.1.0</strong></div>
-        <div>Phase 1 Foundation Preview</div>
-        <div style={{ marginTop: '4px', opacity: 0.75 }}>Standalone Ops Console</div>
+        <div><strong>AthleteConnect v1.0</strong></div>
+        <div>Admin Phase 5 Active</div>
+        <div style={{ marginTop: '4px', opacity: 0.75 }}>Connected to MongoDB</div>
       </div>
     </aside>
   );

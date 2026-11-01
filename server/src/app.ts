@@ -8,6 +8,7 @@ import { availabilityRouter } from './routes/availability';
 import { bookingRouter } from './routes/booking';
 import { coachDiscoveryRouter } from './routes/coachDiscovery';
 import { userRouter } from './routes/user';
+import { adminRouter } from './routes/admin';
 import { notFoundHandler } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -49,6 +50,7 @@ export function createApp(): Application {
   app.use('/api/bookings', bookingRouter);
   app.use('/api/coaches', coachDiscoveryRouter);
   app.use('/api/users', userRouter);
+  app.use('/api/admin', adminRouter);
 
   // Catch-all 404 handler for undefined endpoints
   app.use(notFoundHandler);
