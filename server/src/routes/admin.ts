@@ -18,11 +18,12 @@ import {
   getAdminHealth,
 } from '../controllers/adminController';
 import { authenticate, requireRole } from '../middleware/auth';
+import { adminLoginLimiter } from '../middleware/rateLimiter';
 
 export const adminRouter = Router();
 
 // Public admin authentication endpoint
-adminRouter.post('/login', adminLogin);
+adminRouter.post('/login', adminLoginLimiter, adminLogin);
 
 // Protected admin-only endpoints
 adminRouter.get('/me', authenticate, requireRole('admin'), getAdminMe);

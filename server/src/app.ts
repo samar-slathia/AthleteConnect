@@ -1,4 +1,5 @@
 import express, { Application } from 'express';
+import helmet from 'helmet';
 import cors, { CorsOptions } from 'cors';
 import { config } from './config/env';
 import { healthRouter } from './routes/health';
@@ -14,6 +15,31 @@ import { errorHandler } from './middleware/errorHandler';
 
 export function createApp(): Application {
   const app = express();
+
+  // Trusted proxy configuration (honored when explicitly configured in production environment)
+  if (config.TRUST_PROXY) {
+    app.set('trust proxy', config.TRUST_PROXY);
+  }
+
+  // HTTP Security Headers via Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          frameAncestors: ["'none'"],
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      hsts: config.isProduction
+        ? {
+            maxAge: 31536000, // 1 year HSTS policy in production
+            includeSubDomains: true,
+          }
+        : false, // Disabled in non-production development and tests to preserve HTTP compatibility
+    })
+  );
 
   // Explicit CORS configuration
   const corsOptions: CorsOptions = {

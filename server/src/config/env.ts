@@ -13,6 +13,7 @@ export interface EnvConfig {
   CORS_ORIGIN: string | string[];
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
+  TRUST_PROXY: boolean | number | string;
   isProduction: boolean;
   isTest: boolean;
   isDevelopment: boolean;
@@ -111,6 +112,21 @@ export function validateAndLoadConfig(env: NodeJS.ProcessEnv = process.env): Env
     );
   }
 
+  // Trusted proxy validation (disabled by default for direct connection security)
+  let TRUST_PROXY: boolean | number | string = false;
+  if (env.TRUST_PROXY !== undefined && env.TRUST_PROXY.trim() !== '') {
+    const rawProxy = env.TRUST_PROXY.trim().toLowerCase();
+    if (rawProxy === 'true' || rawProxy === '1') {
+      TRUST_PROXY = true;
+    } else if (rawProxy === 'false' || rawProxy === '0') {
+      TRUST_PROXY = false;
+    } else if (!isNaN(Number(rawProxy))) {
+      TRUST_PROXY = Number(rawProxy);
+    } else {
+      TRUST_PROXY = env.TRUST_PROXY.trim();
+    }
+  }
+
   return Object.freeze({
     NODE_ENV,
     PORT,
@@ -118,6 +134,7 @@ export function validateAndLoadConfig(env: NodeJS.ProcessEnv = process.env): Env
     CORS_ORIGIN,
     JWT_SECRET,
     JWT_EXPIRES_IN,
+    TRUST_PROXY,
     isProduction,
     isTest,
     isDevelopment,
