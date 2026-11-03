@@ -6,6 +6,8 @@ import {
   acceptBooking,
   rejectBooking,
   cancelBooking,
+  startBookingSession,
+  completeBooking,
 } from '../controllers/bookingController';
 import {
   getBookingMessages,
@@ -32,6 +34,12 @@ bookingRouter.patch('/:id/reject', authenticate, requireRole('coach'), rejectBoo
 
 // Cancel booking (Customer or Assigned Coach)
 bookingRouter.patch('/:id/cancel', authenticate, cancelBooking);
+
+// Start coaching session / coach arrival (Assigned coach only)
+bookingRouter.patch('/:id/start', authenticate, requireRole('coach'), startBookingSession);
+
+// Complete accepted or in-progress session (Assigned coach only)
+bookingRouter.patch('/:id/complete', authenticate, requireRole('coach'), completeBooking);
 
 // Booking-linked Chat Messages
 bookingRouter.get('/:id/messages', authenticate, getBookingMessages);

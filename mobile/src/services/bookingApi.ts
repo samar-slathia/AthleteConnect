@@ -9,6 +9,7 @@ export { isValidCalendarDate, ACTIVE_VENUE_TYPES };
 export type BookingStatus =
   | 'pending'
   | 'accepted'
+  | 'in_progress'
   | 'rejected'
   | 'cancelled'
   | 'completed';
@@ -64,6 +65,9 @@ export interface BookingItem {
   cancelledBy?: 'customer' | 'coach';
   locationCoordinates?: BookingCoordinates;
   coordinates?: BookingCoordinates;
+  sessionStartedAt?: string;
+  expectedEndedAt?: string;
+  completedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -384,6 +388,94 @@ export interface BookingMessageItem {
   createdAt: string;
   updatedAt?: string;
 }
+
+/**
+ * Starts a coaching session upon coach arrival.
+ * PATCH /api/bookings/:id/start
+ */
+export async function startBookingSession(
+  bookingId: string,
+  token: string
+): Promise<BookingItem> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required to start session.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.BOOKINGS}/${encodeURIComponent(bookingId.trim())}/start`;
+
+  const response = await safeFetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  const data = await response.json();
+  if (!data.booking) {
+    throw new AuthApiError('Invalid response from booking service.', response.status);
+  }
+
+  return data.booking;
+}
+
+/**
+ * Complete an accepted or in-progress session (Assigned coach only).
+ * PATCH /api/bookings/:id/complete
+ */
+export async function completeBooking(
+  bookingId: string,
+  token: string
+): Promise<BookingItem> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required to complete session.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.BOOKINGS}/${encodeURIComponent(bookingId.trim())}/complete`;
+
+  const response = await safeFetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  const data = await response.json();
+  if (!data.booking) {
+    throw new AuthApiError('Invalid response from booking service.', response.status);
+  }
+
+  return data.booking;
+}
+
+/**
+ * Submit a rating & review for a completed booking.
+ * POST /api/bookings/:id/review
+ */
+
 
 /**
  * Retrieve messages for a specific booking.

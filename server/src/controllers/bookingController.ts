@@ -560,3 +560,271 @@ export async function cancelBooking(
     return next(error);
   }
 }
+
+/**
+ * Starts a coaching session upon coach arrival (Assigned coach only).
+ * PATCH /api/bookings/:id/start
+ * Permitted only if status is 'accepted' (idempotent if already 'in_progress').
+ * Only the assigned coach can start the coaching session.
+ * Uses atomic conditional updates to prevent race conditions under concurrent requests.
+ */
+export async function startBookingSession(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid booking ID format.' });
+    }
+
+    const booking = await Booking.findById(id)
+      .populate('customerId', 'name')
+      .populate('coachId', 'name');
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+
+    const coachIdStr = (booking.coachId?._id || booking.coachId).toString();
+    const isAssignedCoach = req.user.role === 'coach' && req.user.id === coachIdStr;
+
+    if (!isAssignedCoach) {
+      return res.status(403).json({
+        error: 'Access forbidden. Only the assigned coach can start this coaching session.',
+      });
+    }
+
+    // Idempotent: If session is already in_progress, return existing session timestamps
+    if (booking.status === 'in_progress') {
+      const serialized = serializeBookingForUser(booking, req.user.id, req.user.role);
+      return res.status(200).json({
+        booking: serialized,
+        message: 'Session is already in progress.',
+      });
+    }
+
+    if (booking.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot start session: booking is already completed.' });
+    }
+
+    if (booking.status !== 'accepted') {
+      return res.status(400).json({
+        error: `Cannot start session for booking with status "${booking.status}". Only accepted bookings can be started.`,
+      });
+    }
+
+    // Validate persisted duration explicitly: must be valid integer within 30-240 minutes
+    const rawDuration = booking.durationMinutes;
+    const durationMinutes = Number(rawDuration);
+    if (
+      rawDuration === undefined ||
+      rawDuration === null ||
+      typeof rawDuration === 'boolean' ||
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes < MIN_BOOKING_DURATION_MINUTES ||
+      durationMinutes > MAX_BOOKING_DURATION_MINUTES
+    ) {
+      return res.status(400).json({
+        error: `Invalid booking duration (${rawDuration}). Persisted session duration must be an integer between ${MIN_BOOKING_DURATION_MINUTES} and ${MAX_BOOKING_DURATION_MINUTES} minutes.`,
+      });
+    }
+
+    const now = new Date();
+    const durationMs = durationMinutes * 60 * 1000;
+    const expectedEnd = new Date(now.getTime() + durationMs);
+
+    // Atomic conditional update: strictly match status 'accepted'
+    const updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: booking._id,
+        coachId: booking.coachId?._id || booking.coachId,
+        status: 'accepted',
+      },
+      {
+        $set: {
+          status: 'in_progress',
+          sessionStartedAt: now,
+          expectedEndedAt: expectedEnd,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate('customerId', 'name')
+      .populate('coachId', 'name');
+
+    if (!updatedBooking) {
+      // Failed atomic update: check latest state to handle concurrent start
+      const current = await Booking.findById(id)
+        .populate('customerId', 'name')
+        .populate('coachId', 'name');
+
+      if (current && current.status === 'in_progress') {
+        const serialized = serializeBookingForUser(current, req.user.id, req.user.role);
+        return res.status(200).json({
+          booking: serialized,
+          message: 'Session is already in progress.',
+        });
+      }
+
+      if (current && current.status === 'completed') {
+        return res.status(400).json({ error: 'Cannot start session: booking is already completed.' });
+      }
+
+      return res.status(400).json({
+        error: `Cannot start session for booking with status "${current?.status || 'unknown'}". Only accepted bookings can be started.`,
+      });
+    }
+
+    const serialized = serializeBookingForUser(updatedBooking, req.user.id, req.user.role);
+
+    return res.status(200).json({
+      booking: serialized,
+      message: 'Coach arrival confirmed. Session started successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Mark a coaching session as completed (Assigned coach only).
+ * PATCH /api/bookings/:id/complete
+ * Permitted only if status is strictly 'in_progress' and expectedEndedAt has elapsed.
+ * Uses atomic conditional update to enforce timing and state transitions atomically.
+ */
+export async function completeBooking(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid booking ID format.' });
+    }
+
+    const booking = await Booking.findById(id)
+      .populate('customerId', 'name')
+      .populate('coachId', 'name');
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+
+    const coachIdStr = (booking.coachId?._id || booking.coachId).toString();
+    const isAssignedCoach = req.user.role === 'coach' && req.user.id === coachIdStr;
+
+    if (!isAssignedCoach) {
+      return res.status(403).json({
+        error: 'Access forbidden. Only the assigned coach can mark this booking as completed.',
+      });
+    }
+
+    if (booking.status === 'completed') {
+      return res.status(400).json({ error: 'Booking is already completed.' });
+    }
+
+    // Strict lifecycle: Only in_progress sessions can be completed
+    if (booking.status !== 'in_progress') {
+      return res.status(400).json({
+        error: `Cannot complete booking with status "${booking.status}". Only in-progress sessions can be completed.`,
+      });
+    }
+
+    if (!booking.expectedEndedAt) {
+      return res.status(400).json({
+        error: 'Cannot complete session: session has not been properly started with an expected end time.',
+      });
+    }
+
+    const nowMs = Date.now();
+    const serverNow = new Date(nowMs);
+    const expectedEndMs = new Date(booking.expectedEndedAt).getTime();
+
+    // Strict timing: zero early-tolerance. Must be now >= expectedEndedAt
+    if (nowMs < expectedEndMs) {
+      const remainingSeconds = Math.ceil((expectedEndMs - nowMs) / 1000);
+      return res.status(400).json({
+        error: `Cannot complete session before the booked duration has elapsed. Session is in progress (${remainingSeconds}s remaining).`,
+        remainingSeconds,
+        expectedEndedAt: booking.expectedEndedAt,
+      });
+    }
+
+    // Atomic conditional update: strictly match in_progress status and expectedEndedAt <= serverNow
+    const updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: booking._id,
+        coachId: booking.coachId?._id || booking.coachId,
+        status: 'in_progress',
+        expectedEndedAt: { $lte: serverNow },
+      },
+      {
+        $set: {
+          status: 'completed',
+          completedAt: serverNow,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate('customerId', 'name')
+      .populate('coachId', 'name');
+
+    if (!updatedBooking) {
+      // Failed atomic update: check latest document state
+      const current = await Booking.findById(id)
+        .populate('customerId', 'name')
+        .populate('coachId', 'name');
+
+      if (current && current.status === 'completed') {
+        return res.status(400).json({ error: 'Booking is already completed.' });
+      }
+
+      if (current && current.status === 'in_progress') {
+        const currentNowMs = Date.now();
+        const currentEndMs = current.expectedEndedAt ? new Date(current.expectedEndedAt).getTime() : 0;
+        if (currentNowMs < currentEndMs) {
+          const remainingSeconds = Math.ceil((currentEndMs - currentNowMs) / 1000);
+          return res.status(400).json({
+            error: `Cannot complete session before the booked duration has elapsed. Session is in progress (${remainingSeconds}s remaining).`,
+            remainingSeconds,
+            expectedEndedAt: current.expectedEndedAt,
+          });
+        }
+      }
+
+      return res.status(400).json({
+        error: `Cannot complete booking with status "${current?.status || 'unknown'}". Only in-progress sessions can be completed.`,
+      });
+    }
+
+    const serialized = serializeBookingForUser(updatedBooking, req.user.id, req.user.role);
+    if (serialized) {
+      serialized.isRated = false;
+      serialized.review = null;
+    }
+
+    return res.status(200).json({
+      booking: serialized,
+      message: 'Session completed successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}

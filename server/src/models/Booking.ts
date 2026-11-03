@@ -24,6 +24,7 @@ export {
 export const BOOKING_STATUSES = [
   'pending',
   'accepted',
+  'in_progress',
   'rejected',
   'cancelled',
   'completed',
@@ -68,6 +69,9 @@ export interface IBooking {
   cancellationReason?: string;
   cancelledBy?: 'customer' | 'coach';
   locationCoordinates?: IBookingCoordinates;
+  sessionStartedAt?: Date;
+  expectedEndedAt?: Date;
+  completedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -336,6 +340,15 @@ const BookingSchema = new Schema<IBookingDocument>(
         max: 180,
       },
     },
+    sessionStartedAt: {
+      type: Date,
+    },
+    expectedEndedAt: {
+      type: Date,
+    },
+    completedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
@@ -420,6 +433,9 @@ export function serializeBookingForUser(
     rejectionReason: b.rejectionReason,
     cancellationReason: b.cancellationReason,
     cancelledBy: b.cancelledBy,
+    sessionStartedAt: b.sessionStartedAt,
+    expectedEndedAt: b.expectedEndedAt,
+    completedAt: b.completedAt,
     createdAt: b.createdAt,
     updatedAt: b.updatedAt,
   };
@@ -432,16 +448,16 @@ export function serializeBookingForUser(
     base.locationCoordinates = b.locationCoordinates;
     base.coordinates = b.locationCoordinates;
   } else if (isCoach) {
-    // 1. Customer contact phone: strictly authorized ONLY when request is 'accepted' or 'completed'
-    if (b.status === 'accepted' || b.status === 'completed') {
+    // 1. Customer contact phone: strictly authorized ONLY when request is 'accepted', 'in_progress', or 'completed'
+    if (b.status === 'accepted' || b.status === 'in_progress' || b.status === 'completed') {
       base.customerPhone = b.customerPhone;
     } else {
       base.customerPhone = undefined;
     }
 
     // 2. Destination address & coordinates: visible for 'pending' (to assess travel distance before accepting),
-    //    'accepted', and 'completed'. Strictly REDACTED for 'rejected' and 'cancelled' bookings.
-    if (b.status === 'pending' || b.status === 'accepted' || b.status === 'completed') {
+    //    'accepted', 'in_progress', and 'completed'. Strictly REDACTED for 'rejected' and 'cancelled' bookings.
+    if (b.status === 'pending' || b.status === 'accepted' || b.status === 'in_progress' || b.status === 'completed') {
       base.trainingAddress = b.trainingAddress;
       base.locationCoordinates = b.locationCoordinates;
       base.coordinates = b.locationCoordinates;

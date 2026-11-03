@@ -68,6 +68,7 @@ export function getSectionKeyForStatus(status: string): BookingSectionKey | null
     case 'pending':
       return 'pending';
     case 'accepted':
+    case 'in_progress':
       return 'accepted';
     case 'rejected':
       return 'declined';

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'rea
 import { Users, Sparkles, Edit3, Clock, AlertCircle, CheckCircle2, Inbox, Calendar } from 'lucide-react-native';
 import { UserProfile } from '../../services/authApi';
 import { AuthContext } from '../../context/AuthContext';
-import { getCoachBookings, acceptBooking, rejectBooking, BookingItem } from '../../services/bookingApi';
+import { getCoachBookings, acceptBooking, rejectBooking, completeBooking, startBookingSession, BookingItem } from '../../services/bookingApi';
 import { groupBookingsForCoach } from '../../utils/bookingSections';
 import { OnboardingStepCard } from './components/OnboardingStepCard';
 import { EmptyStateSection } from './components/EmptyStateSection';
@@ -148,6 +148,48 @@ export const CoachHomeView: React.FC<CoachHomeViewProps> = ({
     }
   };
 
+  const handleStartSession = async (bookingId: string) => {
+    if (!effectiveToken || processingBookingId) return;
+    setProcessingBookingId(bookingId);
+    setActionFeedback(null);
+    try {
+      const updated = await startBookingSession(bookingId, effectiveToken);
+      setActionFeedback({ type: 'success', message: 'Session started! Timer is running.' });
+      const next = bookings.map((b) => (b._id === bookingId ? updated : b));
+      updateBookings(next);
+      if (onRefreshBookings) {
+        await onRefreshBookings();
+      } else {
+        await loadBookings();
+      }
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', message: err?.message || 'Failed to start session.' });
+    } finally {
+      setProcessingBookingId(null);
+    }
+  };
+
+  const handleComplete = async (bookingId: string) => {
+    if (!effectiveToken || processingBookingId) return;
+    setProcessingBookingId(bookingId);
+    setActionFeedback(null);
+    try {
+      const updated = await completeBooking(bookingId, effectiveToken);
+      setActionFeedback({ type: 'success', message: 'Session marked as completed!' });
+      const next = bookings.map((b) => (b._id === bookingId ? updated : b));
+      updateBookings(next);
+      if (onRefreshBookings) {
+        await onRefreshBookings();
+      } else {
+        await loadBookings();
+      }
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', message: err?.message || 'Failed to complete session.' });
+    } finally {
+      setProcessingBookingId(null);
+    }
+  };
+
   if (isEditingProfile) {
     return <CoachProfileEditScreen onBack={() => setIsEditingProfile(false)} />;
   }
@@ -276,6 +318,9 @@ export const CoachHomeView: React.FC<CoachHomeViewProps> = ({
               <CoachBookingCard
                 key={b._id}
                 booking={b}
+                onStartSession={handleStartSession}
+                onComplete={handleComplete}
+                isProcessing={processingBookingId === b._id}
                 onOpenChat={(bookingToChat) => setActiveChatBooking(bookingToChat)}
               />
             ))}
@@ -520,6 +565,9 @@ export const CoachHomeView: React.FC<CoachHomeViewProps> = ({
                   <CoachBookingCard
                     key={b._id}
                     booking={b}
+                    onStartSession={handleStartSession}
+                    onComplete={handleComplete}
+                    isProcessing={processingBookingId === b._id}
                     onOpenChat={
                       section.key === 'accepted'
                         ? (bookingToChat) => setActiveChatBooking(bookingToChat)
@@ -601,7 +649,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
