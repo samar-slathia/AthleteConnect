@@ -28,7 +28,7 @@ export const RolePreviewScreen: React.FC<RolePreviewScreenProps> = ({ route, nav
           <ArrowLeft size={20} color={COLORS.navy} />
           <Text style={styles.backText}>Change Role</Text>
         </TouchableOpacity>
-        <Badge label="Phase 1 Preview" variant="lime" />
+        <Badge label="Phase 1 Preview" variant="orange" />
       </View>
 
       <ScrollView

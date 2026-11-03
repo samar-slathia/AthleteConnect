@@ -967,11 +967,11 @@ const styles = StyleSheet.create({
   },
   noticeCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderRadius: RADII.md,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: 'rgba(200, 241, 105, 0.6)',
+    borderColor: 'rgba(249, 115, 22, 0.4)',
     marginBottom: SPACING.md,
     alignItems: 'flex-start',
     gap: SPACING.sm,
@@ -980,7 +980,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -1119,7 +1119,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chipSelected: {
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderColor: COLORS.navy,
     borderWidth: 1.5,
   },
@@ -1134,7 +1134,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   checkboxIndicatorSelected: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     borderColor: COLORS.navy,
   },
   chipText: {

@@ -44,8 +44,15 @@ export const Animated = {
     setValue(v: number) {
       this.value = v;
     }
+    interpolate(_config: any) {
+      return this.value;
+    }
   },
   timing: () => ({
+    start: (cb?: any) => cb && cb({ finished: true }),
+    stop: () => {},
+  }),
+  spring: () => ({
     start: (cb?: any) => cb && cb({ finished: true }),
     stop: () => {},
   }),
@@ -56,8 +63,39 @@ export const Animated = {
   View: createMockComponent('Animated.View'),
 };
 
+export const PanResponder = {
+  create: (config: any) => ({
+    panHandlers: {},
+    ...config,
+  }),
+};
+
 export const AccessibilityInfo = {
   isReduceMotionEnabled: () => Promise.resolve(false),
+};
+
+type AppStateStatus = 'active' | 'background' | 'inactive';
+type AppStateListener = (state: AppStateStatus) => void;
+const appStateListeners = new Set<AppStateListener>();
+
+export const AppState = {
+  currentState: 'active' as AppStateStatus,
+  addEventListener: (_type: string, listener: AppStateListener) => {
+    appStateListeners.add(listener);
+    return {
+      remove: () => {
+        appStateListeners.delete(listener);
+      },
+    };
+  },
+  _simulateStateChange: (newState: AppStateStatus) => {
+    AppState.currentState = newState;
+    appStateListeners.forEach((l) => l(newState));
+  },
+  _resetListeners: () => {
+    appStateListeners.clear();
+    AppState.currentState = 'active';
+  },
 };
 
 export default {
@@ -74,5 +112,7 @@ export default {
   Modal,
   Linking,
   Animated,
+  PanResponder,
   AccessibilityInfo,
+  AppState,
 };

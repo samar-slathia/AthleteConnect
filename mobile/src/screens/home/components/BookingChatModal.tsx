@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Modal,
   View,
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
     borderRadius: RADII.md,
   },
   myMessageBubble: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     borderBottomRightRadius: 2,
   },
   theirMessageBubble: {
@@ -580,7 +580,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: RADII.md,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     alignItems: 'center',
     justifyContent: 'center',
   },

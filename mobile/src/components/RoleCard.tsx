@@ -46,7 +46,7 @@ export const RoleCard: React.FC<RoleCardProps> = ({ role, isSelected, onSelect }
               {role.title}
             </Text>
           </View>
-          <Badge label={role.badge} variant={isSelected ? 'lime' : 'demo'} />
+          <Badge label={role.badge} variant={isSelected ? 'orange' : 'demo'} />
         </View>
 
         <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     marginRight: SPACING.sm,
   },
   iconWrapperSelected: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
   },
   titleArea: {
     flex: 1,
@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   },
   radioCircleSelected: {
     borderColor: COLORS.navy,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
   },
   description: {
     ...TYPOGRAPHY.body,

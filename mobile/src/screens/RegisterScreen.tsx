@@ -176,7 +176,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
               <ShieldCheck size={18} color={COLORS.navy} />
               <Text style={styles.roleCardTitle}>Account Role</Text>
             </View>
-            {roleInfo && <Badge label={roleInfo.badge} variant="lime" />}
+            {roleInfo && <Badge label={roleInfo.badge} variant="orange" />}
           </View>
           <Text style={styles.roleName}>{roleInfo ? roleInfo.title : 'Invalid Role'}</Text>
           <Text style={styles.roleDescription}>

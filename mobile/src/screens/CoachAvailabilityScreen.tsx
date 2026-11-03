@@ -958,9 +958,9 @@ const styles = StyleSheet.create({
   },
   guidanceBanner: {
     flexDirection: 'row',
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderWidth: 1,
-    borderColor: '#D4F38C',
+    borderColor: '#FED7AA',
     borderRadius: RADII.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
@@ -1098,7 +1098,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   dayCountBadgeSelected: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
   },
   dayCountBadgeUnselected: {
     backgroundColor: COLORS.mist,
@@ -1223,12 +1223,12 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   presetChip: {
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderRadius: RADII.full,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: '#D4F38C',
+    borderColor: '#FED7AA',
   },
   presetChipText: {
     fontSize: 11,

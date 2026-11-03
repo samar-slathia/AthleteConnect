@@ -4,16 +4,17 @@ import { COLORS, SPACING, RADII } from '../theme/tokens';
 
 interface BadgeProps {
   label: string;
-  variant?: 'lime' | 'navy' | 'demo' | 'success';
+  variant?: 'orange' | 'lime' | 'navy' | 'demo' | 'success';
 }
 
 export const Badge: React.FC<BadgeProps> = ({ label, variant = 'demo' }) => {
   const getBadgeStyle = () => {
     switch (variant) {
+      case 'orange':
       case 'lime':
         return {
-          container: { backgroundColor: COLORS.limeSubtle, borderColor: 'rgba(200, 241, 105, 0.6)' },
-          text: { color: '#2B4200' },
+          container: { backgroundColor: COLORS.orangeSubtle, borderColor: 'rgba(249, 115, 22, 0.4)' },
+          text: { color: '#C2410C' },
         };
       case 'navy':
         return {

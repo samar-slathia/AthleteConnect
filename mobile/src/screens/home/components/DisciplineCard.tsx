@@ -22,7 +22,7 @@ export const DisciplineCard: React.FC<DisciplineCardProps> = ({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>{title}</Text>
-        {audienceFocus ? <Badge label={audienceFocus} variant="lime" /> : null}
+        {audienceFocus ? <Badge label={audienceFocus} variant="orange" /> : null}
       </View>
 
       <Text style={styles.tagline}>{tagline}</Text>

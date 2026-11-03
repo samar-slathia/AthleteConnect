@@ -2547,7 +2547,7 @@ describe('CoachBookingCard', () => {
     const venueText = findElement(tree, (el) => el.props?.children === 'Coach Home / Studio');
     expect(venueText).toBeDefined();
 
-    const statusBadge = findElement(tree, (el) => el.props?.label === 'Pending Response' && el.props?.variant === 'lime');
+    const statusBadge = findElement(tree, (el) => el.props?.label === 'Pending Response' && el.props?.variant === 'orange');
     expect(statusBadge).toBeDefined();
 
     cleanup();

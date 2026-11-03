@@ -95,9 +95,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   primaryContainer: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     borderWidth: 1,
-    borderColor: '#B8E35A',
+    borderColor: COLORS.orangePressed,
     shadowColor: COLORS.navy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,

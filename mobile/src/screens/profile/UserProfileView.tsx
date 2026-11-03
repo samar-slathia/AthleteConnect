@@ -185,7 +185,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
 
         <Text style={styles.headerName}>{user.name}</Text>
         <View style={styles.rolePillWrap}>
-          <Badge label={roleInfo ? roleInfo.title : user.role} variant="lime" />
+          <Badge label={roleInfo ? roleInfo.title : user.role} variant="orange" />
         </View>
       </View>
 
@@ -229,7 +229,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
             <Text style={styles.infoLabel}>Account Role</Text>
             <View style={styles.roleBadgeRow}>
               <Text style={styles.infoValue}>{roleInfo ? roleInfo.title : user.role}</Text>
-              {roleInfo ? <Badge label={roleInfo.badge} variant="lime" /> : null}
+              {roleInfo ? <Badge label={roleInfo.badge} variant="orange" /> : null}
             </View>
           </View>
         </View>
@@ -387,9 +387,9 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: RADII.full,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     borderWidth: 2,
-    borderColor: '#BFE75F',
+    borderColor: COLORS.orangePressed,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
@@ -546,9 +546,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   chip: {
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderWidth: 1,
-    borderColor: '#BFE75F',
+    borderColor: '#FED7AA',
     borderRadius: RADII.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,

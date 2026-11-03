@@ -195,9 +195,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarCircle: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     borderWidth: 2,
-    borderColor: '#BFE75F',
+    borderColor: COLORS.orangePressed,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   initialsContainer: {
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     alignItems: 'center',
     justifyContent: 'center',
   },

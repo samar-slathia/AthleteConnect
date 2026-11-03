@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     width: 18,
     height: 3,
     borderRadius: RADII.full,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
   },
   inactiveIndicator: {
     width: 18,
