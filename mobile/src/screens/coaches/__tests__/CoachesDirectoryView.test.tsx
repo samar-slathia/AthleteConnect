@@ -600,4 +600,146 @@ describe('CoachesDirectoryView', () => {
 
     harness.cleanup();
   });
+
+  describe('Schedule-Based Availability Indicators', () => {
+    it('displays ONLINE badge with green dot when schedule.dateStatus is online', async () => {
+      const onlineCoach: CoachDiscoveryItem = {
+        ...mockBoxingCoach,
+        _id: 'coach_online_01',
+        name: 'Online Coach',
+        schedule: {
+          date: '2028-11-06',
+          timezone: 'Asia/Kolkata',
+          dateStatus: 'online',
+          hasAvailableSlots: true,
+          availableIntervalsCount: 2,
+        },
+      };
+
+      getPublicCoachesSpy.mockResolvedValue([onlineCoach]);
+
+      const harness = createInteractiveHarness(<CoachesDirectoryView initialDiscipline="boxing" />);
+      await flushPromises();
+      const tree = harness.render();
+
+      const badgeEl = findByTestId(tree, 'coach-schedule-badge-coach_online_01');
+      expect(badgeEl).not.toBeNull();
+      expect(extractText(badgeEl)).toContain('ONLINE');
+
+      const greenDot = findByTestId(tree, 'coach-dot-online-coach_online_01');
+      expect(greenDot).not.toBeNull();
+
+      harness.cleanup();
+    });
+
+    it('displays OFFLINE badge with grey dot when schedule.dateStatus is offline', async () => {
+      const offlineCoach: CoachDiscoveryItem = {
+        ...mockBoxingCoach,
+        _id: 'coach_offline_02',
+        name: 'Offline Coach',
+        schedule: {
+          date: '2028-11-06',
+          timezone: 'Asia/Kolkata',
+          dateStatus: 'offline',
+          hasAvailableSlots: false,
+          availableIntervalsCount: 0,
+        },
+      };
+
+      getPublicCoachesSpy.mockResolvedValue([offlineCoach]);
+
+      const harness = createInteractiveHarness(<CoachesDirectoryView initialDiscipline="boxing" />);
+      await flushPromises();
+      const tree = harness.render();
+
+      const badgeEl = findByTestId(tree, 'coach-schedule-badge-coach_offline_02');
+      expect(badgeEl).not.toBeNull();
+      expect(extractText(badgeEl)).toContain('OFFLINE');
+
+      const greyDot = findByTestId(tree, 'coach-dot-offline-coach_offline_02');
+      expect(greyDot).not.toBeNull();
+
+      harness.cleanup();
+    });
+
+    it('displays FULLY BOOKED neutral badge when schedule.dateStatus is fully_booked', async () => {
+      const bookedCoach: CoachDiscoveryItem = {
+        ...mockBoxingCoach,
+        _id: 'coach_booked_03',
+        name: 'Booked Coach',
+        schedule: {
+          date: '2028-11-06',
+          timezone: 'Asia/Kolkata',
+          dateStatus: 'fully_booked',
+          hasAvailableSlots: false,
+          availableIntervalsCount: 0,
+        },
+      };
+
+      getPublicCoachesSpy.mockResolvedValue([bookedCoach]);
+
+      const harness = createInteractiveHarness(<CoachesDirectoryView initialDiscipline="boxing" />);
+      await flushPromises();
+      const tree = harness.render();
+
+      const badgeEl = findByTestId(tree, 'coach-schedule-badge-coach_booked_03');
+      expect(badgeEl).not.toBeNull();
+      expect(extractText(badgeEl)).toContain('FULLY BOOKED');
+
+      // No dot on fully booked
+      expect(findByTestId(tree, 'coach-dot-online-coach_booked_03')).toBeNull();
+      expect(findByTestId(tree, 'coach-dot-offline-coach_booked_03')).toBeNull();
+
+      harness.cleanup();
+    });
+
+    it('displays UNKNOWN neutral badge when schedule.dateStatus is unknown', async () => {
+      const unknownCoach: CoachDiscoveryItem = {
+        ...mockBoxingCoach,
+        _id: 'coach_unknown_04',
+        name: 'Unknown Coach',
+        schedule: {
+          date: '2028-11-06',
+          timezone: 'Asia/Kolkata',
+          dateStatus: 'unknown',
+          hasAvailableSlots: false,
+          availableIntervalsCount: 0,
+        },
+      };
+
+      getPublicCoachesSpy.mockResolvedValue([unknownCoach]);
+
+      const harness = createInteractiveHarness(<CoachesDirectoryView initialDiscipline="boxing" />);
+      await flushPromises();
+      const tree = harness.render();
+
+      const badgeEl = findByTestId(tree, 'coach-schedule-badge-coach_unknown_04');
+      expect(badgeEl).not.toBeNull();
+      expect(extractText(badgeEl)).toContain('UNKNOWN');
+
+      harness.cleanup();
+    });
+
+    it('falls back to isConfiguredAvailability when schedule object is not present', async () => {
+      const legacyCoach: CoachDiscoveryItem = {
+        ...mockBoxingCoach,
+        _id: 'coach_legacy_05',
+        name: 'Legacy Coach',
+        isConfiguredAvailability: true,
+        schedule: undefined,
+      };
+
+      getPublicCoachesSpy.mockResolvedValue([legacyCoach]);
+
+      const harness = createInteractiveHarness(<CoachesDirectoryView initialDiscipline="boxing" />);
+      await flushPromises();
+      const tree = harness.render();
+
+      const badgeEl = findByTestId(tree, 'coach-schedule-badge-coach_legacy_05');
+      expect(badgeEl).not.toBeNull();
+      expect(extractText(badgeEl)).toContain('ONLINE');
+
+      harness.cleanup();
+    });
+  });
 });

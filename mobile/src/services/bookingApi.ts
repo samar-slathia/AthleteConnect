@@ -28,6 +28,44 @@ export interface CoachDiscoveryProfile {
   locations: string[];
 }
 
+export interface CoachRatingSummary {
+  averageRating: number;
+  reviewCount: number;
+}
+
+export interface CoachReviewItem {
+  _id: string;
+  rating: number;
+  reviewText?: string;
+  customerName?: string;
+  createdAt: string;
+}
+
+export type CoachDateStatus = 'online' | 'offline' | 'fully_booked' | 'unknown';
+export type RequestedSlotStatus = 'available' | 'time_unavailable' | 'outside_working_hours' | 'unknown';
+
+export interface CoachRequestedSlotSummary {
+  status: RequestedSlotStatus;
+  isBookable: boolean;
+  label: string;
+}
+
+export interface CoachScheduleSummary {
+  date: string;
+  timezone: string;
+  dateStatus: CoachDateStatus;
+  hasAvailableSlots: boolean;
+  availableIntervalsCount: number;
+  requestedSlot?: CoachRequestedSlotSummary;
+}
+
+export interface BookingReview {
+  _id?: string;
+  rating: number;
+  reviewText?: string;
+  createdAt?: string;
+}
+
 export interface CoachDiscoveryItem {
   _id: string;
   name: string;
@@ -37,6 +75,7 @@ export interface CoachDiscoveryItem {
   timezone: string;
   rating?: CoachRatingSummary;
   reviews?: CoachReviewItem[];
+  schedule?: CoachScheduleSummary;
 }
 
 export interface BookingCoordinates {
@@ -165,6 +204,9 @@ async function safeFetch(url: string, options: RequestInit): Promise<Response> {
 export async function getPublicCoaches(params?: {
   discipline?: string;
   location?: string;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
 }): Promise<CoachDiscoveryItem[]> {
   const baseUrl = getApiBaseUrl();
   const queryParts: string[] = [];
@@ -173,6 +215,15 @@ export async function getPublicCoaches(params?: {
   }
   if (params?.location) {
     queryParts.push(`location=${encodeURIComponent(params.location)}`);
+  }
+  if (params?.date) {
+    queryParts.push(`date=${encodeURIComponent(params.date)}`);
+  }
+  if (params?.startTime) {
+    queryParts.push(`startTime=${encodeURIComponent(params.startTime)}`);
+  }
+  if (params?.endTime) {
+    queryParts.push(`endTime=${encodeURIComponent(params.endTime)}`);
   }
   const queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
   const url = `${baseUrl}${API_ENDPOINTS.COACHES}${queryString}`;
@@ -185,7 +236,7 @@ export async function getPublicCoaches(params?: {
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response, token);
+    const errorMessage = await parseResponseError(response);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -401,17 +452,6 @@ export async function rejectBooking(
   return data.booking;
 }
 
-export interface BookingMessageItem {
-  _id: string;
-  bookingId: string;
-  senderId: string;
-  senderRole: 'parent' | 'individual' | 'coach' | 'admin';
-  senderName: string;
-  text: string;
-  createdAt: string;
-  updatedAt?: string;
-}
-
 /**
  * Starts a coaching session upon coach arrival.
  * PATCH /api/bookings/:id/start
@@ -493,12 +533,6 @@ export async function completeBooking(
 
   return data.booking;
 }
-
-/**
- * Submit a rating & review for a completed booking.
- * POST /api/bookings/:id/review
- */
-
 
 /**
  * Submit a rating & review for a completed booking.
@@ -602,7 +636,16 @@ export async function getCoachReviews(
   return response.json();
 }
 
-
+export interface BookingMessageItem {
+  _id: string;
+  bookingId: string;
+  senderId: string;
+  senderRole: 'parent' | 'individual' | 'coach' | 'admin';
+  senderName: string;
+  text: string;
+  createdAt: string;
+  updatedAt?: string;
+}
 
 /**
  * Retrieve messages for a specific booking.

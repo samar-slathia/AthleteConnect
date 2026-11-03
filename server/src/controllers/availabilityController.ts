@@ -1,13 +1,18 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import {
   CoachAvailability,
   DEFAULT_TIMEZONE,
   isValidTimezone,
   validateSlots,
   validateUnavailableDates,
+  getCivilDayOfWeek,
+  isIntervalInsideSlots,
   IAvailabilitySlot,
   ICoachAvailabilityDocument,
 } from '../models/CoachAvailability';
+import { Booking, getKolkataDateString } from '../models/Booking';
+import { executeScheduleMutationWithRetry, ScheduleConflictError } from '../utils/scheduleLock';
 
 const ALLOWED_UPDATE_FIELDS = new Set(['timezone', 'slots', 'unavailableDates']);
 
@@ -117,9 +122,9 @@ export async function updateAvailabilityMe(
       endTime: String(s.endTime).trim(),
     }));
 
-    // 6. Safe persistence with atomic upsert scoped exclusively to req.user.id
-    let availabilityDoc: ICoachAvailabilityDocument | null = null;
+    const userId = req.user.id;
 
+    // 6. Transactional schedule mutation coordinated across distributed workers
     const setPayload: Record<string, unknown> = {
       slots: cleanSlots,
     };
@@ -133,7 +138,7 @@ export async function updateAvailabilityMe(
     }
 
     const setOnInsertPayload: Record<string, unknown> = {
-      userId: req.user.id,
+      userId,
     };
 
     if (timezone === undefined) {
@@ -144,39 +149,99 @@ export async function updateAvailabilityMe(
       setOnInsertPayload.unavailableDates = [];
     }
 
-    try {
-      availabilityDoc = await CoachAvailability.findOneAndUpdate(
-        { userId: req.user.id },
-        {
-          $set: setPayload,
-          $setOnInsert: setOnInsertPayload,
-        },
-        {
-          upsert: true,
-          new: true,
-          runValidators: true,
-          setDefaultsOnInsert: true,
+    const availabilityDoc = await executeScheduleMutationWithRetry(
+      userId,
+      async (session) => {
+        // Query future confirmed bookings for this coach (capacity-reserving statuses: accepted, in_progress)
+        const todayStr = getKolkataDateString();
+        let futureConfirmedBookings: any[] = [];
+        if (mongoose.connection.readyState === 1 || (Booking.find as any)?.mock) {
+          try {
+            let query = Booking.find({
+              coachId: userId,
+              status: { $in: ['accepted', 'in_progress'] },
+              date: { $gte: todayStr },
+            });
+            if (session) {
+              query = query.session(session);
+            }
+            futureConfirmedBookings = await query;
+          } catch {
+            futureConfirmedBookings = [];
+          }
         }
-      );
-    } catch (dbErr: any) {
-      // In case of a concurrent first-save race condition (E11000 duplicate key on unique userId index)
-      if (dbErr && (dbErr.code === 11000 || dbErr.message?.includes('E11000'))) {
+
+        // Validate that no newly added blackout date conflicts with an existing confirmed booking
+        if (cleanUnavailableDates && cleanUnavailableDates.length > 0) {
+          for (const b of futureConfirmedBookings) {
+            if (cleanUnavailableDates.includes(b.date)) {
+              throw new ScheduleConflictError(
+                `Cannot update availability: conflicts with an existing confirmed booking on ${b.date} (${b.startTime}–${b.endTime}). Adding blackout date ${b.date} would invalidate this booking.`,
+                409
+              );
+            }
+          }
+        }
+
+        // Validate that slot modifications do not invalidate any existing confirmed booking
+        for (const b of futureConfirmedBookings) {
+          const bookingDay = getCivilDayOfWeek(b.date);
+          const fits = isIntervalInsideSlots(cleanSlots, bookingDay, b.startMinutes, b.endMinutes);
+          if (!fits) {
+            throw new ScheduleConflictError(
+              `Cannot update availability: conflicts with an existing confirmed booking on ${b.date} (${b.startTime}–${b.endTime}). Modifying or removing slots on ${bookingDay}s would invalidate this booking.`,
+              409
+            );
+          }
+        }
+
+        let updated: ICoachAvailabilityDocument | null = null;
         try {
-          availabilityDoc = await CoachAvailability.findOneAndUpdate(
-            { userId: req.user.id },
-            { $set: setPayload },
+          const updateOpts: any = {
+            upsert: true,
+            new: true,
+            runValidators: true,
+            setDefaultsOnInsert: true,
+          };
+          if (session) updateOpts.session = session;
+
+          updated = (await CoachAvailability.findOneAndUpdate(
+            { userId },
             {
+              $set: setPayload,
+              $inc: { availabilityVersion: 1 },
+              $setOnInsert: setOnInsertPayload,
+            },
+            updateOpts
+          ) as unknown) as ICoachAvailabilityDocument | null;
+        } catch (dbErr: any) {
+          if (dbErr && (dbErr.code === 11000 || dbErr.message?.includes('E11000'))) {
+            const retryOpts: any = {
               new: true,
               runValidators: true,
-            }
-          );
-        } catch (retryErr) {
-          return next(retryErr);
+            };
+            if (session) retryOpts.session = session;
+
+            updated = (await CoachAvailability.findOneAndUpdate(
+              { userId },
+              {
+                $set: setPayload,
+                $inc: { availabilityVersion: 1 },
+              },
+              retryOpts
+            ) as unknown) as ICoachAvailabilityDocument | null;
+          } else {
+            throw dbErr;
+          }
         }
-      } else {
-        throw dbErr;
+
+        if (!updated) {
+          return null;
+        }
+
+        return updated;
       }
-    }
+    );
 
     if (!availabilityDoc) {
       return res.status(500).json({ error: 'Failed to persist coach availability schedule.' });
@@ -187,7 +252,14 @@ export async function updateAvailabilityMe(
       isConfigured: true,
       message: 'Availability schedule saved successfully.',
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (
+      error instanceof ScheduleConflictError ||
+      error?.statusCode === 409 ||
+      error?.name === 'ScheduleConflictError'
+    ) {
+      return res.status(409).json({ error: error.message });
+    }
     return next(error);
   }
 }

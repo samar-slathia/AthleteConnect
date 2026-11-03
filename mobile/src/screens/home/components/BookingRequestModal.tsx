@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -35,6 +35,7 @@ import {
   CoachDiscipline,
   VenueType,
   ActiveVenueType,
+  CoachDateStatus,
 } from '../../../services/bookingApi';
 import {
   detectDeviceLocation,
@@ -115,13 +116,91 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  const fetchCoaches = useCallback(
+    async (targetDate?: string, targetStartTime?: string, targetEndTime?: string) => {
+      const currentRequestId = ++fetchCoachesRequestIdRef.current;
+      try {
+        setIsLoadingCoaches(true);
+        setLoadCoachesError(null);
+
+        const dateParam = targetDate !== undefined ? targetDate : date;
+        const validDate = dateParam && isValidCalendarDate(dateParam) ? dateParam.trim() : undefined;
+        const startParam = targetStartTime !== undefined ? targetStartTime : startTime;
+        const endParam = targetEndTime !== undefined ? targetEndTime : endTime;
+
+        const list = await getPublicCoaches({
+          discipline: selectedSport || undefined,
+          date: validDate,
+          startTime: startParam || undefined,
+          endTime: endParam || undefined,
+        });
+        if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
+        setCoaches(list);
+
+        const targetCoachId = initialCoachIdRef.current;
+        const targetSport = initialSportRef.current;
+
+        if (targetCoachId) {
+          const coach = list.find((c) => c._id === targetCoachId);
+          if (!coach) {
+            setSelectedCoachId('');
+            setFormError('The requested coach could not be found or is no longer available.');
+          } else if (targetSport) {
+            if (coach.profile?.disciplines?.includes(targetSport)) {
+              setSelectedCoachId(targetCoachId);
+              setSelectedSport(targetSport);
+              if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
+                const activeCoachVenues = coach.profile.venueTypes.filter(
+                  (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+                );
+                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                  setSelectedVenue(activeCoachVenues[0]);
+                }
+              }
+            } else {
+              setSelectedCoachId('');
+              setFormError('The selected coach does not offer the chosen discipline.');
+            }
+          } else {
+            // targetSport was not supplied: determine a valid discipline offered by the selected coach
+            const disciplines = coach.profile?.disciplines || [];
+            if (disciplines.length > 0) {
+              setSelectedSport(disciplines[0]);
+              setSelectedCoachId(targetCoachId);
+              if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
+                const activeCoachVenues = coach.profile.venueTypes.filter(
+                  (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
+                );
+                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                  setSelectedVenue(activeCoachVenues[0]);
+                }
+              }
+            } else {
+              setSelectedCoachId('');
+              setFormError('The selected coach has not configured any disciplines.');
+            }
+          }
+        }
+      } catch (err: any) {
+        if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
+        setLoadCoachesError(err.message || 'Unable to load coaches.');
+      } finally {
+        if (currentRequestId === fetchCoachesRequestIdRef.current) {
+          setIsLoadingCoaches(false);
+        }
+      }
+    },
+    [date, startTime, endTime, selectedSport, selectedVenue]
+  );
+
   // Set default tomorrow date in Asia/Kolkata when modal opens
   useEffect(() => {
     if (visible) {
       locationRequestIdRef.current++;
       userEditedAddressRef.current = false;
       setIsDetectingLocation(false);
-      setDate(getKolkataTomorrowDateString());
+      const tomorrowDate = getKolkataTomorrowDateString();
+      setDate(tomorrowDate);
       setSelectedVenue('customer_home');
       setSelectedSport(initialSport || null);
       setSelectedCoachId('');
@@ -142,72 +221,27 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       initialCoachIdRef.current = initialCoachId;
       initialSportRef.current = initialSport;
 
-      fetchCoaches();
+      fetchCoaches(tomorrowDate, '09:00', '10:00');
     }
-  }, [visible, initialSport, initialCoachId]);
+  }, [visible, initialSport, initialCoachId, fetchCoaches]);
 
-  const fetchCoaches = async () => {
-    const currentRequestId = ++fetchCoachesRequestIdRef.current;
-    try {
-      setIsLoadingCoaches(true);
-      setLoadCoachesError(null);
-      const list = await getPublicCoaches();
-      if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
-      setCoaches(list);
+  // When date, startTime, or endTime changes, refresh coach schedule summaries for that date
+  const prevDateRef = useRef<string>('');
+  const prevTimesRef = useRef<string>('');
+  useEffect(() => {
+    if (!visible) return;
+    const currentTimes = `${startTime}-${endTime}`;
+    if (date === prevDateRef.current && currentTimes === prevTimesRef.current) return;
+    prevDateRef.current = date;
+    prevTimesRef.current = currentTimes;
 
-      const targetCoachId = initialCoachIdRef.current;
-      const targetSport = initialSportRef.current;
-
-      if (targetCoachId) {
-        const coach = list.find((c) => c._id === targetCoachId);
-        if (!coach) {
-          setSelectedCoachId('');
-          setFormError('The requested coach could not be found or is no longer available.');
-        } else if (targetSport) {
-          if (coach.profile?.disciplines?.includes(targetSport)) {
-            setSelectedCoachId(targetCoachId);
-            setSelectedSport(targetSport);
-            if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
-              const activeCoachVenues = coach.profile.venueTypes.filter(
-                (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
-              );
-              if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
-                setSelectedVenue(activeCoachVenues[0]);
-              }
-            }
-          } else {
-            setSelectedCoachId('');
-            setFormError('The selected coach does not offer the chosen discipline.');
-          }
-        } else {
-          // targetSport was not supplied: determine a valid discipline offered by the selected coach
-          const disciplines = coach.profile?.disciplines || [];
-          if (disciplines.length > 0) {
-            setSelectedSport(disciplines[0]);
-            setSelectedCoachId(targetCoachId);
-            if (coach.profile?.venueTypes && coach.profile.venueTypes.length > 0) {
-              const activeCoachVenues = coach.profile.venueTypes.filter(
-                (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
-              );
-              if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
-                setSelectedVenue(activeCoachVenues[0]);
-              }
-            }
-          } else {
-            setSelectedCoachId('');
-            setFormError('The selected coach has not configured any disciplines.');
-          }
-        }
-      }
-    } catch (err: any) {
-      if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
-      setLoadCoachesError(err.message || 'Unable to load coaches.');
-    } finally {
-      if (currentRequestId === fetchCoachesRequestIdRef.current) {
-        setIsLoadingCoaches(false);
-      }
+    if (isValidCalendarDate(date)) {
+      const timer = setTimeout(() => {
+        fetchCoaches(date, startTime, endTime);
+      }, 300);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [date, startTime, endTime, visible, fetchCoaches]);
 
   const handleSelectSport = (sport: CoachDiscipline) => {
     if (sport === selectedSport) return;
@@ -254,6 +288,13 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     : [];
 
   const selectedCoach = coaches.find((c) => c._id === selectedCoachId);
+  const selectedCoachScheduleStatus: CoachDateStatus =
+    loadCoachesError
+      ? 'unknown'
+      : selectedCoach?.schedule?.dateStatus ??
+        (selectedCoach?.isConfiguredAvailability !== undefined
+          ? (selectedCoach.isConfiguredAvailability ? 'online' : 'offline')
+          : 'unknown');
 
   // Filter venue types offered by selected coach (only active venues)
   const coachVenues = (selectedCoach?.profile?.venueTypes || []).filter(
@@ -604,7 +645,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 <Text style={styles.subtleError} testID="error-coaches-load">{loadCoachesError}</Text>
                 <TouchableOpacity
                   style={styles.retryButton}
-                  onPress={fetchCoaches}
+                  onPress={() => fetchCoaches()}
                   testID="button-retry-coaches"
                 >
                   <Text style={styles.retryButtonText}>Retry</Text>
@@ -686,6 +727,51 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 />
               </View>
             </View>
+
+            {/* Selected Coach Schedule Feedback for Chosen Date */}
+            {selectedCoach && (
+              <View style={styles.scheduleFeedbackBox} testID="selected-coach-schedule-feedback">
+                <View style={styles.scheduleFeedbackRow}>
+                  <Text style={styles.scheduleFeedbackCoachName} numberOfLines={1}>
+                    {selectedCoach.name} on {date}:
+                  </Text>
+                  <View
+                    style={[
+                      styles.scheduleBadge,
+                      selectedCoachScheduleStatus === 'online' && styles.scheduleBadgeOnline,
+                      selectedCoachScheduleStatus === 'offline' && styles.scheduleBadgeOffline,
+                      selectedCoachScheduleStatus === 'fully_booked' && styles.scheduleBadgeFullyBooked,
+                      selectedCoachScheduleStatus === 'unknown' && styles.scheduleBadgeUnknown,
+                    ]}
+                    testID="booking-modal-coach-schedule-badge"
+                  >
+                    <Text
+                      style={[
+                        styles.scheduleBadgeText,
+                        selectedCoachScheduleStatus === 'online' && styles.scheduleTextOnline,
+                        selectedCoachScheduleStatus === 'offline' && styles.scheduleTextOffline,
+                        selectedCoachScheduleStatus === 'fully_booked' && styles.scheduleTextFullyBooked,
+                        selectedCoachScheduleStatus === 'unknown' && styles.scheduleTextUnknown,
+                      ]}
+                      testID="booking-modal-coach-schedule-text"
+                    >
+                      {selectedCoachScheduleStatus === 'online'
+                        ? 'ONLINE'
+                        : selectedCoachScheduleStatus === 'offline'
+                        ? 'OFFLINE'
+                        : selectedCoachScheduleStatus === 'fully_booked'
+                        ? 'FULLY BOOKED'
+                        : 'UNKNOWN'}
+                    </Text>
+                  </View>
+                </View>
+                {selectedCoach.schedule?.requestedSlot ? (
+                  <Text style={styles.requestedSlotText} testID="booking-modal-requested-slot-status">
+                    Slot ({startTime}–{endTime}): {selectedCoach.schedule.requestedSlot.label}
+                  </Text>
+                ) : null}
+              </View>
+            )}
 
             {/* 4. Venue Type */}
             <Text style={styles.inputLabel}>4. VENUE TYPE</Text>
@@ -1114,7 +1200,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   coachChipRateSelected: {
-    color: COLORS.lime,
+    color: COLORS.orange,
   },
   rowWrap: {
     flexDirection: 'row',
@@ -1131,8 +1217,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   optionPillSelected: {
-    backgroundColor: COLORS.lime,
-    borderColor: '#BFE75F',
+    backgroundColor: COLORS.orange,
+    borderColor: COLORS.orangePressed,
   },
   optionPillText: {
     ...TYPOGRAPHY.caption,
@@ -1437,8 +1523,8 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xs,
   },
   locationOptionPillSelected: {
-    backgroundColor: COLORS.lime,
-    borderColor: '#BFE75F',
+    backgroundColor: COLORS.orange,
+    borderColor: COLORS.orangePressed,
   },
   locationOptionText: {
     ...TYPOGRAPHY.caption,
@@ -1449,5 +1535,76 @@ const styles = StyleSheet.create({
   locationOptionTextSelected: {
     color: COLORS.navy,
     fontWeight: '700',
+  },
+  scheduleFeedbackBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: RADII.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: SPACING.sm,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.sm,
+  },
+  scheduleFeedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  scheduleFeedbackCoachName: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.navy,
+    flex: 1,
+  },
+  scheduleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADII.sm,
+  },
+  scheduleBadgeOnline: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  scheduleBadgeOffline: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  scheduleBadgeFullyBooked: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  scheduleBadgeUnknown: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  scheduleBadgeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  scheduleTextOnline: {
+    color: '#065F46',
+  },
+  scheduleTextOffline: {
+    color: '#6B7280',
+  },
+  scheduleTextFullyBooked: {
+    color: '#991B1B',
+  },
+  scheduleTextUnknown: {
+    color: '#64748B',
+  },
+  requestedSlotText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
 });

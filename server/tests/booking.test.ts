@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { app } from '../src/app';
 import { User } from '../src/models/User';
 import { CoachProfile } from '../src/models/CoachProfile';
-import { CoachAvailability } from '../src/models/CoachAvailability';
+import { CoachAvailability, getCivilDayOfWeek } from '../src/models/CoachAvailability';
 import {
   Booking,
   BOOKING_STATUSES,
@@ -424,6 +424,19 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
         if (idStr === strangerId.toString()) return strangerUser as any;
         return null;
       });
+
+      // Default valid coach availability covering future and today dates
+      const futureDayOfWeek = getCivilDayOfWeek(validFutureDate);
+      const todayDayOfWeek = getCivilDayOfWeek(getKolkataDateString());
+      vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+        userId: coachId,
+        timezone: 'Asia/Kolkata',
+        slots: [
+          { dayOfWeek: futureDayOfWeek, startTime: '06:00', endTime: '22:00' },
+          { dayOfWeek: todayDayOfWeek, startTime: '06:00', endTime: '22:00' },
+        ],
+        unavailableDates: [],
+      } as any);
     });
 
     // -------------------------------------------------------------------------
@@ -450,8 +463,6 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
           venueTypes: ['customer_home', 'ground'],
           hourlyRate: 1500,
         } as any);
-
-        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
 
         let capturedSaveInput: any = null;
         vi.spyOn(Booking.prototype, 'save').mockImplementation(async function (this: any) {
@@ -501,8 +512,6 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
           hourlyRate: 1500,
         } as any);
 
-        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
-
         const savedBooking = {
           _id: new mongoose.Types.ObjectId(),
           customerId: parentId,
@@ -541,7 +550,6 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
 
       it('allows individual to create a booking request successfully', async () => {
         vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
-        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
 
         const savedBooking = {
           _id: new mongoose.Types.ObjectId(),
@@ -642,7 +650,12 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
 
         try {
           vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
-          vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+          vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+            userId: coachId,
+            timezone: 'Asia/Kolkata',
+            slots: [{ dayOfWeek: 'friday', startTime: '06:00', endTime: '22:00' }],
+            unavailableDates: [],
+          } as any);
           vi.spyOn(Booking.prototype, 'save').mockResolvedValue({
             _id: new mongoose.Types.ObjectId(),
             customerId: parentId,
@@ -667,7 +680,12 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
 
       it('accepts a valid future date', async () => {
         vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
-        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          timezone: 'Asia/Kolkata',
+          slots: [{ dayOfWeek: 'friday', startTime: '06:00', endTime: '22:00' }],
+          unavailableDates: [],
+        } as any);
         vi.spyOn(Booking.prototype, 'save').mockResolvedValue({
           _id: new mongoose.Types.ObjectId(),
           customerId: parentId,
@@ -711,6 +729,7 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
         vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
         vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
           userId: coachId,
+          slots: [{ dayOfWeek: getCivilDayOfWeek(validFutureDate), startTime: '08:00', endTime: '18:00' }],
           unavailableDates: [validFutureDate],
         } as any);
 
@@ -721,6 +740,122 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
 
         expect(res.status).toBe(400);
         expect(res.body.error).toContain('unavailable');
+      });
+
+      it('rejects booking with HTTP 400 when coach has no availability document', async () => {
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send(validPayload);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('has not configured availability for this date');
+      });
+
+      it('rejects booking with HTTP 400 when coach has empty slots array', async () => {
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [],
+          unavailableDates: [],
+        } as any);
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send(validPayload);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('has not configured availability for this date');
+      });
+
+      it('accepts booking that fits completely within coach configured availability slot', async () => {
+        const tomorrowDay = getCivilDayOfWeek(validFutureDate);
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [{ dayOfWeek: tomorrowDay, startTime: '08:00', endTime: '12:00' }],
+          unavailableDates: [],
+        } as any);
+        vi.spyOn(Booking.prototype, 'save').mockResolvedValue({
+          _id: new mongoose.Types.ObjectId(),
+          customerId: parentId,
+          coachId,
+          ...validPayload,
+          status: 'pending',
+          paymentStatus: 'unpaid',
+        } as any);
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send({ ...validPayload, startTime: '09:00', endTime: '10:00' });
+
+        expect(res.status).toBe(201);
+        expect(res.body.booking.status).toBe('pending');
+      });
+
+      it('rejects booking when requested time falls outside coach configured slots with 400', async () => {
+        const tomorrowDay = getCivilDayOfWeek(validFutureDate);
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [{ dayOfWeek: tomorrowDay, startTime: '09:00', endTime: '12:00' }],
+          unavailableDates: [],
+        } as any);
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send({ ...validPayload, startTime: '14:00', endTime: '15:00' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('outside Coach');
+        expect(res.body.error).toContain('configured availability');
+      });
+
+      it('rejects booking when session spans across a slot boundary between disjoint slots with 400', async () => {
+        const tomorrowDay = getCivilDayOfWeek(validFutureDate);
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [
+            { dayOfWeek: tomorrowDay, startTime: '09:00', endTime: '11:00' },
+            { dayOfWeek: tomorrowDay, startTime: '12:00', endTime: '14:00' },
+          ],
+          unavailableDates: [],
+        } as any);
+
+        // Requested 10:30 to 12:30 (crosses disjoint slot boundary)
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send({ ...validPayload, startTime: '10:30', endTime: '12:30' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('Sessions must fit completely within one continuous availability interval');
+      });
+
+      it('rejects booking on a day when coach has no working intervals configured with 400', async () => {
+        const tomorrowDay = getCivilDayOfWeek(validFutureDate);
+        const otherDay = tomorrowDay === 'monday' ? 'tuesday' : 'monday';
+        vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [{ dayOfWeek: otherDay, startTime: '09:00', endTime: '12:00' }],
+          unavailableDates: [],
+        } as any);
+
+        const res = await request(app)
+          .post('/api/bookings')
+          .set('Authorization', `Bearer ${parentToken}`)
+          .send(validPayload);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('has no working intervals configured');
       });
     });
 
@@ -980,6 +1115,187 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
         expect(res.body.booking.status).toBe('accepted');
       });
 
+      it('rejects acceptance when conflicting in_progress booking overlaps with 409 Conflict', async () => {
+        const bookingId = new mongoose.Types.ObjectId();
+        const mockBooking: any = {
+          _id: bookingId,
+          customerId: { _id: parentId, name: 'Ramesh' },
+          coachId: { _id: coachId, name: 'Maya' },
+          sport: 'boxing',
+          date: validFutureDate,
+          startTime: '09:30',
+          endTime: '10:30',
+          startMinutes: 570,
+          endMinutes: 630,
+          durationMinutes: 60,
+          venueType: 'coach_home',
+          trainingAddress: 'Any Address',
+          customerPhone: '+919876543210',
+          status: 'pending',
+          save: vi.fn(),
+        };
+
+        vi.spyOn(Booking, 'findById').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          then: (cb: any) => cb(mockBooking),
+        } as any);
+
+        // Overlapping session is currently in_progress
+        vi.spyOn(Booking, 'findOne').mockResolvedValue({
+          _id: new mongoose.Types.ObjectId(),
+          startTime: '09:00',
+          endTime: '10:00',
+          status: 'in_progress',
+        } as any);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${bookingId}/accept`)
+          .set('Authorization', `Bearer ${coachToken}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('Overlaps with an already accepted session');
+      });
+
+      it('rejects acceptance when coach has added a blackout date since request submission with 409', async () => {
+        const bookingId = new mongoose.Types.ObjectId();
+        const mockBooking: any = {
+          _id: bookingId,
+          customerId: { _id: parentId, name: 'Ramesh' },
+          coachId: { _id: coachId, name: 'Maya' },
+          sport: 'boxing',
+          date: validFutureDate,
+          startTime: '09:00',
+          endTime: '10:00',
+          startMinutes: 540,
+          endMinutes: 600,
+          durationMinutes: 60,
+          venueType: 'coach_home',
+          trainingAddress: 'Any Address',
+          customerPhone: '+919876543210',
+          status: 'pending',
+          save: vi.fn(),
+        };
+
+        vi.spyOn(Booking, 'findById').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          then: (cb: any) => cb(mockBooking),
+        } as any);
+
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [{ dayOfWeek: getCivilDayOfWeek(validFutureDate), startTime: '08:00', endTime: '18:00' }],
+          unavailableDates: [validFutureDate],
+        } as any);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${bookingId}/accept`)
+          .set('Authorization', `Bearer ${coachToken}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('blackout date');
+      });
+
+      it('rejects acceptance with HTTP 409 when coach has no availability document', async () => {
+        const bookingId = new mongoose.Types.ObjectId();
+        const mockBooking: any = {
+          _id: bookingId,
+          customerId: { _id: parentId, name: 'Ramesh' },
+          coachId: { _id: coachId, name: 'Maya' },
+          sport: 'boxing',
+          date: validFutureDate,
+          startTime: '09:00',
+          endTime: '10:00',
+          startMinutes: 540,
+          endMinutes: 600,
+          durationMinutes: 60,
+          status: 'pending',
+          save: vi.fn(),
+        };
+
+        vi.spyOn(Booking, 'findById').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          then: (cb: any) => cb(mockBooking),
+        } as any);
+
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${bookingId}/accept`)
+          .set('Authorization', `Bearer ${coachToken}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('Coach has not configured availability');
+      });
+
+      it('rejects acceptance with HTTP 409 when coach slots array is empty', async () => {
+        const bookingId = new mongoose.Types.ObjectId();
+        const mockBooking: any = {
+          _id: bookingId,
+          customerId: { _id: parentId, name: 'Ramesh' },
+          coachId: { _id: coachId, name: 'Maya' },
+          sport: 'boxing',
+          date: validFutureDate,
+          startTime: '09:00',
+          endTime: '10:00',
+          startMinutes: 540,
+          endMinutes: 600,
+          durationMinutes: 60,
+          status: 'pending',
+          save: vi.fn(),
+        };
+
+        vi.spyOn(Booking, 'findById').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          then: (cb: any) => cb(mockBooking),
+        } as any);
+
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue({
+          userId: coachId,
+          slots: [],
+          unavailableDates: [],
+        } as any);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${bookingId}/accept`)
+          .set('Authorization', `Bearer ${coachToken}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('Coach has not configured availability');
+      });
+
+      it('rejects acceptance when availability was removed after booking creation', async () => {
+        const bookingId = new mongoose.Types.ObjectId();
+        const mockBooking: any = {
+          _id: bookingId,
+          customerId: { _id: parentId, name: 'Ramesh' },
+          coachId: { _id: coachId, name: 'Maya' },
+          sport: 'boxing',
+          date: validFutureDate,
+          startTime: '09:00',
+          endTime: '10:00',
+          startMinutes: 540,
+          endMinutes: 600,
+          durationMinutes: 60,
+          status: 'pending',
+          save: vi.fn(),
+        };
+
+        vi.spyOn(Booking, 'findById').mockReturnValue({
+          populate: vi.fn().mockReturnThis(),
+          then: (cb: any) => cb(mockBooking),
+        } as any);
+
+        // Availability record deleted / returns null at acceptance time
+        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${bookingId}/accept`)
+          .set('Authorization', `Bearer ${coachToken}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('Coach has not configured availability');
+      });
+
       it('rejects when non-assigned coach attempts accept with 403', async () => {
         const bookingId = new mongoose.Types.ObjectId();
         const mockBooking = {
@@ -1144,12 +1460,190 @@ describe('Booking Core Backend Tests (Phase 2D-1)', () => {
         expect(coach.passwordHash).toBeUndefined();
         expect(coach.email).toBeUndefined();
       });
+
+      it('returns schedule with dateStatus: online when coach has at least 30 minutes available on requested date', async () => {
+        const testDate = '2028-11-06'; // Monday
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              userId: coachId,
+              timezone: 'Asia/Kolkata',
+              slots: [{ dayOfWeek: 'monday', startTime: '09:00', endTime: '12:00' }],
+              unavailableDates: [],
+            },
+          ]),
+        } as any);
+
+        // No bookings on that date
+        vi.spyOn(Booking, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([]),
+        } as any);
+
+        const res = await request(app).get(`/api/coaches?date=${testDate}`);
+
+        expect(res.status).toBe(200);
+        const coach = res.body.coaches[0];
+        expect(coach.schedule).toBeDefined();
+        expect(coach.schedule.dateStatus).toBe('online');
+        expect(coach.schedule.hasAvailableSlots).toBe(true);
+        expect(coach.schedule.availableIntervalsCount).toBe(1);
+      });
+
+      it('returns schedule with dateStatus: offline when coach has no schedule configured', async () => {
+        const testDate = '2028-11-06';
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([]), // No availability configured
+        } as any);
+
+        const res = await request(app).get(`/api/coaches?date=${testDate}`);
+
+        expect(res.status).toBe(200);
+        const coach = res.body.coaches[0];
+        expect(coach.schedule.dateStatus).toBe('offline');
+        expect(coach.schedule.hasAvailableSlots).toBe(false);
+      });
+
+      it('returns schedule with dateStatus: offline when requested date is in blackout dates', async () => {
+        const testDate = '2028-11-06';
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              userId: coachId,
+              timezone: 'Asia/Kolkata',
+              slots: [{ dayOfWeek: 'monday', startTime: '09:00', endTime: '12:00' }],
+              unavailableDates: [testDate],
+            },
+          ]),
+        } as any);
+
+        const res = await request(app).get(`/api/coaches?date=${testDate}`);
+
+        expect(res.status).toBe(200);
+        const coach = res.body.coaches[0];
+        expect(coach.schedule.dateStatus).toBe('offline');
+        expect(coach.schedule.hasAvailableSlots).toBe(false);
+      });
+
+      it('returns schedule with dateStatus: fully_booked when all intervals on requested date are occupied', async () => {
+        const testDate = '2028-11-06'; // Monday
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              userId: coachId,
+              timezone: 'Asia/Kolkata',
+              slots: [{ dayOfWeek: 'monday', startTime: '09:00', endTime: '10:00' }], // 1 hour slot
+              unavailableDates: [],
+            },
+          ]),
+        } as any);
+
+        // Booking completely covers the 09:00-10:00 slot
+        vi.spyOn(Booking, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              coachId,
+              startMinutes: 540,
+              endMinutes: 600,
+            },
+          ]),
+        } as any);
+
+        const res = await request(app).get(`/api/coaches?date=${testDate}`);
+
+        expect(res.status).toBe(200);
+        const coach = res.body.coaches[0];
+        expect(coach.schedule.dateStatus).toBe('fully_booked');
+        expect(coach.schedule.hasAvailableSlots).toBe(false);
+        expect(coach.schedule.availableIntervalsCount).toBe(0);
+      });
+
+      it('one occupied requested time does not incorrectly mark the whole day fully_booked', async () => {
+        const testDate = '2028-11-06'; // Monday
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              userId: coachId,
+              timezone: 'Asia/Kolkata',
+              slots: [{ dayOfWeek: 'monday', startTime: '09:00', endTime: '12:00' }], // 3 hour slot
+              unavailableDates: [],
+            },
+          ]),
+        } as any);
+
+        // Booking covers 09:00-10:00, but 10:00-12:00 is still available!
+        vi.spyOn(Booking, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              coachId,
+              startMinutes: 540,
+              endMinutes: 600,
+            },
+          ]),
+        } as any);
+
+        // Customer queries for the specific booked slot 09:00-10:00
+        const res = await request(app).get(`/api/coaches?date=${testDate}&startTime=09:00&endTime=10:00`);
+
+        expect(res.status).toBe(200);
+        const coach = res.body.coaches[0];
+        // The day itself remains ONLINE because 10:00-12:00 is free!
+        expect(coach.schedule.dateStatus).toBe('online');
+        expect(coach.schedule.hasAvailableSlots).toBe(true);
+        // But the specific requested slot is time_unavailable
+        expect(coach.schedule.requestedSlot.status).toBe('time_unavailable');
+        expect(coach.schedule.requestedSlot.isBookable).toBe(false);
+      });
+
+      it('public discovery response never exposes private customer details or booking IDs', async () => {
+        const testDate = '2028-11-06';
+        vi.spyOn(User, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([coachUser]),
+        } as any);
+        vi.spyOn(CoachProfile, 'find').mockResolvedValue([] as any);
+        vi.spyOn(CoachAvailability, 'find').mockReturnValue({
+          select: vi.fn().mockResolvedValue([
+            {
+              userId: coachId,
+              timezone: 'Asia/Kolkata',
+              slots: [{ dayOfWeek: 'monday', startTime: '09:00', endTime: '12:00' }],
+            },
+          ]),
+        } as any);
+
+        const res = await request(app).get(`/api/coaches?date=${testDate}`);
+
+        expect(res.status).toBe(200);
+        const jsonStr = JSON.stringify(res.body);
+        expect(jsonStr).not.toContain('customerId');
+        expect(jsonStr).not.toContain('customerPhone');
+        expect(jsonStr).not.toContain('trainingAddress');
+        expect(jsonStr).not.toContain('bookingId');
+      });
     });
 
     describe('Location Coordinates & Privacy Authorization', () => {
       it('accepts and persists valid coordinates on booking creation', async () => {
         vi.spyOn(CoachProfile, 'findOne').mockResolvedValue(null);
-        vi.spyOn(CoachAvailability, 'findOne').mockResolvedValue(null);
 
         const createdBookingMock = {
           _id: new mongoose.Types.ObjectId(),

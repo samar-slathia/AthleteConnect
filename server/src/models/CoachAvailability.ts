@@ -32,6 +32,7 @@ export interface ICoachAvailability {
   timezone: string;
   slots: IAvailabilitySlot[];
   unavailableDates: string[];
+  availabilityVersion?: number;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -77,6 +78,49 @@ export function isValidCalendarDate(dateStr: string): boolean {
     utcDate.getUTCMonth() === month - 1 &&
     utcDate.getUTCDate() === day
   );
+}
+
+const DAY_INDEX_MAP: DayOfWeek[] = [
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+];
+
+/**
+ * Returns the civil day of the week for a YYYY-MM-DD date string.
+ * Uses UTC date calculations to guarantee deterministic, timezone-independent output.
+ */
+export function getCivilDayOfWeek(dateStr: string): DayOfWeek {
+  const [yearStr, monthStr, dayStr] = dateStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+  return DAY_INDEX_MAP[utcDate.getUTCDay()];
+}
+
+/**
+ * Checks if a requested session interval [startMinutes, endMinutes] fits completely
+ * within one continuous availability slot configured for that day of week.
+ * Disjoint slot combinations across slot boundaries are strictly prohibited.
+ */
+export function isIntervalInsideSlots(
+  slots: IAvailabilitySlot[],
+  day: DayOfWeek,
+  startMinutes: number,
+  endMinutes: number
+): boolean {
+  if (!Array.isArray(slots) || slots.length === 0) return false;
+  return slots.some((s) => {
+    if (s.dayOfWeek !== day) return false;
+    const slotStart = timeToMinutes(s.startTime);
+    const slotEnd = timeToMinutes(s.endTime);
+    return slotStart <= startMinutes && endMinutes <= slotEnd;
+  });
 }
 
 export interface SlotValidationResult {
@@ -321,6 +365,11 @@ const CoachAvailabilitySchema = new Schema<ICoachAvailabilityDocument>(
             validateUnavailableDates(props.value).error || 'Invalid unavailableDates configuration.',
         },
       ],
+    },
+    availabilityVersion: {
+      type: Number,
+      default: 1,
+      min: 1,
     },
   },
   {

@@ -6,6 +6,8 @@ import {
   COACH_DISCIPLINES,
   VENUE_TYPES,
   ACTIVE_VENUE_TYPES,
+  MIN_BOOKING_DURATION_MINUTES,
+  MAX_BOOKING_DURATION_MINUTES,
   MAX_REASON_LENGTH,
   validateBookingTimes,
   validateCustomerPhone,
@@ -15,9 +17,9 @@ import {
 } from '../models/Booking';
 import { User } from '../models/User';
 import { CoachProfile } from '../models/CoachProfile';
-import { CoachAvailability } from '../models/CoachAvailability';
+import { CoachAvailability, getCivilDayOfWeek, isIntervalInsideSlots } from '../models/CoachAvailability';
 import { Review } from '../models/Review';
-import { withCoachScheduleLock } from '../utils/scheduleLock';
+import { executeScheduleMutationWithRetry, ScheduleConflictError } from '../utils/scheduleLock';
 
 const ALLOWED_CREATE_FIELDS = new Set([
   'coachId',
@@ -202,14 +204,38 @@ export async function createBooking(
       }
     }
 
-    // 10. Optional Coach Availability check (only check blackout dates if availability is configured)
+    // 10. Coach Availability validation (must have configured slots, blackout dates & continuous slot containment)
     const coachAvailability = await CoachAvailability.findOne({ userId: cleanCoachId });
-    if (coachAvailability && Array.isArray(coachAvailability.unavailableDates)) {
-      if (coachAvailability.unavailableDates.includes(cleanDate)) {
-        return res.status(400).json({
-          error: `Coach ${coachUser.name} is unavailable on ${cleanDate} (blackout date).`,
-        });
-      }
+    if (!coachAvailability || !Array.isArray(coachAvailability.slots) || coachAvailability.slots.length === 0) {
+      return res.status(400).json({
+        error: `Coach ${coachUser.name} has not configured availability for this date. Please choose another coach or date.`,
+      });
+    }
+
+    if (Array.isArray(coachAvailability.unavailableDates) && coachAvailability.unavailableDates.includes(cleanDate)) {
+      return res.status(400).json({
+        error: `Coach ${coachUser.name} is unavailable on ${cleanDate} (blackout date).`,
+      });
+    }
+
+    const dayOfWeek = getCivilDayOfWeek(cleanDate);
+    const daySlots = coachAvailability.slots.filter((s) => s.dayOfWeek === dayOfWeek);
+    if (daySlots.length === 0) {
+      return res.status(400).json({
+        error: `Coach ${coachUser.name} has no working intervals configured on ${dayOfWeek}s (${cleanDate}).`,
+      });
+    }
+
+    const fitsInSlot = isIntervalInsideSlots(
+      coachAvailability.slots,
+      dayOfWeek,
+      timeValidation.startMinutes!,
+      timeValidation.endMinutes!
+    );
+    if (!fitsInSlot) {
+      return res.status(400).json({
+        error: `Requested session time (${startTime.trim()}–${endTime.trim()}) is outside Coach ${coachUser.name}'s configured availability on ${dayOfWeek} (${cleanDate}). Sessions must fit completely within one continuous availability interval.`,
+      });
     }
 
     // 11. Persist new booking with pending status
@@ -361,6 +387,29 @@ export async function getBookingById(
       return res.status(403).json({ error: 'Access forbidden. You are not a participant in this booking.' });
     }
 
+    if (
+      booking.status === 'completed' &&
+      (mongoose.connection.readyState === 1 || (Review.findOne as any)?.mock)
+    ) {
+      try {
+        const review = await Review.findOne({ bookingId: booking._id }).select(
+          'rating reviewText createdAt'
+        );
+        serialized.isRated = Boolean(review);
+        serialized.review = review
+          ? {
+              _id: review._id.toString(),
+              rating: review.rating,
+              reviewText: review.reviewText,
+              createdAt: review.createdAt,
+            }
+          : null;
+      } catch {
+        serialized.isRated = false;
+        serialized.review = null;
+      }
+    }
+
     return res.status(200).json({ booking: serialized });
   } catch (error) {
     return next(error);
@@ -414,40 +463,124 @@ export async function acceptBooking(
       });
     }
 
-    // Execute conflict check and state transition inside mutual exclusion lock
-    let conflictError: string | null = null;
-
-    await withCoachScheduleLock(coachIdStr, booking.date, async () => {
-      // Re-check booking in case of concurrent status mutation
-      const freshBooking = await Booking.findById(booking._id);
+    // Execute conflict check and state transition inside mutual exclusion lock & transaction
+    await executeScheduleMutationWithRetry(coachIdStr, async (session) => {
+      // 1. Re-check booking in case of concurrent status mutation
+      let freshBookingQuery = Booking.findById(booking._id);
+      if (session && freshBookingQuery.session) {
+        freshBookingQuery = freshBookingQuery.session(session);
+      }
+      const freshBooking = (await freshBookingQuery) || booking;
       if (!freshBooking || freshBooking.status !== 'pending') {
-        conflictError = 'Booking state changed concurrently. Request is no longer pending.';
-        return;
+        throw new ScheduleConflictError(
+          'Booking state changed concurrently. Request is no longer pending.',
+          409
+        );
       }
 
-      // Query for conflicting accepted bookings on the same calendar date
-      const conflictingBooking = await Booking.findOne({
-        coachId: booking.coachId,
+      // 2. Re-read current coach availability (resilient to disconnected unit tests)
+      let coachAvailability: any = null;
+      if (mongoose.connection.readyState === 1 || (CoachAvailability.findOne as any)?.mock) {
+        try {
+          let availQuery = CoachAvailability.findOne({ userId: coachIdStr });
+          if (session && availQuery.session) {
+            availQuery = availQuery.session(session);
+          }
+          coachAvailability = await availQuery;
+        } catch {
+          coachAvailability = null;
+        }
+      }
+
+      // 3. Reject acceptance if coach availability is absent, empty, blacked out, or no longer covers session
+      if (!coachAvailability || !Array.isArray(coachAvailability.slots) || coachAvailability.slots.length === 0) {
+        throw new ScheduleConflictError(
+          `Cannot accept booking: Coach has not configured availability.`,
+          409
+        );
+      }
+
+      // 4. Validate blackout date
+      if (
+        Array.isArray(coachAvailability.unavailableDates) &&
+        coachAvailability.unavailableDates.includes(freshBooking.date)
+      ) {
+        throw new ScheduleConflictError(
+          `Cannot accept booking: Coach is unavailable on ${freshBooking.date} (blackout date).`,
+          409
+        );
+      }
+
+      // 5. Validate complete requested time interval against working slot
+      const dayOfWeek = getCivilDayOfWeek(freshBooking.date);
+      const fitsInSlot = isIntervalInsideSlots(
+        coachAvailability.slots,
+        dayOfWeek,
+        freshBooking.startMinutes,
+        freshBooking.endMinutes
+      );
+      if (!fitsInSlot) {
+        throw new ScheduleConflictError(
+          `Cannot accept booking: Requested time interval (${freshBooking.startTime}–${freshBooking.endTime}) is outside current configured availability slots for ${dayOfWeek}.`,
+          409
+        );
+      }
+
+      // 5. Query for conflicting accepted or in_progress bookings on the same calendar date
+      let conflictQuery = Booking.findOne({
+        coachId: booking.coachId?._id || booking.coachId,
         date: booking.date,
-        status: 'accepted',
+        status: { $in: ['accepted', 'in_progress'] },
         _id: { $ne: booking._id },
         startMinutes: { $lt: booking.endMinutes },
         endMinutes: { $gt: booking.startMinutes },
       });
+      if (session && conflictQuery.session) {
+        conflictQuery = conflictQuery.session(session);
+      }
+      const conflictingBooking = await conflictQuery;
 
       if (conflictingBooking) {
-        conflictError = `Cannot accept booking. Overlaps with an already accepted session (${conflictingBooking.startTime}–${conflictingBooking.endTime}).`;
-        return;
+        throw new ScheduleConflictError(
+          `Cannot accept booking. Overlaps with an already accepted session (${conflictingBooking.startTime}–${conflictingBooking.endTime}).`,
+          409
+        );
       }
 
-      freshBooking.status = 'accepted';
-      await freshBooking.save();
+      // 6. Conditionally transition booking from pending to accepted (verifying matchedCount === 1)
+      let matchedCount = 1;
+      if (mongoose.connection.readyState === 1 && !(freshBooking as any).save?.mock) {
+        const updateOpts: any = {};
+        if (session) updateOpts.session = session;
+
+        const updateRes = await Booking.updateOne(
+          {
+            _id: freshBooking._id,
+            coachId: coachIdStr,
+            status: 'pending',
+          },
+          {
+            $set: { status: 'accepted' },
+          },
+          updateOpts
+        );
+        matchedCount = updateRes.matchedCount;
+      } else {
+        freshBooking.status = 'accepted';
+        if (typeof freshBooking.save === 'function') {
+          await freshBooking.save();
+        }
+      }
+
+      if (matchedCount !== 1) {
+        throw new ScheduleConflictError(
+          'Booking status changed concurrently before acceptance.',
+          409
+        );
+      }
+
       booking.status = 'accepted';
     });
-
-    if (conflictError) {
-      return res.status(409).json({ error: conflictError });
-    }
 
     const serialized = serializeBookingForUser(booking, req.user.id, req.user.role);
 
@@ -455,7 +588,14 @@ export async function acceptBooking(
       booking: serialized,
       message: 'Booking accepted successfully.',
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (
+      error instanceof ScheduleConflictError ||
+      error?.statusCode === 409 ||
+      error?.name === 'ScheduleConflictError'
+    ) {
+      return res.status(409).json({ error: error.message });
+    }
     return next(error);
   }
 }

@@ -20,12 +20,14 @@ import {
   ChevronRight,
   ShieldCheck,
   Sparkles,
+  Star,
 } from 'lucide-react-native';
 import {
   getPublicCoaches,
   CoachDiscoveryItem,
   CoachDiscipline,
   BookingItem,
+  CoachDateStatus,
 } from '../../services/bookingApi';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
 import { getPublicCoachPhotoUrl } from '../../services/profilePhotoService';
@@ -43,12 +45,14 @@ const DISCIPLINES: { id: CoachDiscipline; label: string }[] = [
 export interface CoachesDirectoryViewProps {
   token?: string | null;
   initialDiscipline?: CoachDiscipline | null;
+  selectedDate?: string | null;
   onBookingSuccess?: (newBooking: BookingItem) => void;
 }
 
 export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
   token,
   initialDiscipline = null,
+  selectedDate = null,
   onBookingSuccess,
 }) => {
   const auth = useContext(AuthContext);
@@ -88,6 +92,7 @@ export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
       try {
         const result = await getPublicCoaches({
           discipline,
+          date: selectedDate && selectedDate.trim() ? selectedDate.trim() : undefined,
         });
 
         // Discard stale responses if a newer request was dispatched
@@ -104,10 +109,10 @@ export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
         }
       }
     },
-    []
+    [selectedDate]
   );
 
-  // Load coaches when discipline changes
+  // Load coaches when discipline or selected date changes
   useEffect(() => {
     if (selectedDiscipline) {
       loadCoaches(selectedDiscipline);
@@ -116,7 +121,7 @@ export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
       setError(null);
       setIsLoading(false);
     }
-  }, [selectedDiscipline, loadCoaches]);
+  }, [selectedDiscipline, selectedDate, loadCoaches]);
 
   const handleSelectDiscipline = (disc: CoachDiscipline) => {
     if (disc === selectedDiscipline) return;
@@ -321,6 +326,13 @@ export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
                   const shortBio =
                     rawBio.length > 90 ? `${rawBio.slice(0, 90)}...` : rawBio;
 
+                  // Schedule status: backend dateStatus, fallback to isConfiguredAvailability
+                  const scheduleStatus: CoachDateStatus =
+                    coach.schedule?.dateStatus ??
+                    (coach.isConfiguredAvailability !== undefined
+                      ? (coach.isConfiguredAvailability ? 'online' : 'offline')
+                      : 'unknown');
+
                   return (
                     <TouchableOpacity
                       key={coach._id}
@@ -340,13 +352,66 @@ export const CoachesDirectoryView: React.FC<CoachesDirectoryViewProps> = ({
                           testID={`coach-card-avatar-${coach._id}`}
                         />
                         <View style={styles.cardHeaderText}>
-                          <Text
-                            style={styles.coachName}
-                            numberOfLines={1}
-                            testID={`coach-name-${coach._id}`}
-                          >
-                            {coach.name}
-                          </Text>
+                          <View style={styles.cardNameAndBadgeRow}>
+                            <Text
+                              style={styles.coachName}
+                              numberOfLines={1}
+                              testID={`coach-name-${coach._id}`}
+                            >
+                              {coach.name}
+                            </Text>
+                            <View
+                              style={[
+                                styles.scheduleBadge,
+                                scheduleStatus === 'online' && styles.scheduleBadgeOnline,
+                                scheduleStatus === 'offline' && styles.scheduleBadgeOffline,
+                                scheduleStatus === 'fully_booked' && styles.scheduleBadgeFullyBooked,
+                                scheduleStatus === 'unknown' && styles.scheduleBadgeUnknown,
+                              ]}
+                              testID={`coach-schedule-badge-${coach._id}`}
+                            >
+                              {scheduleStatus === 'online' && (
+                                <View style={styles.dotOnline} testID={`coach-dot-online-${coach._id}`} />
+                              )}
+                              {scheduleStatus === 'offline' && (
+                                <View style={styles.dotOffline} testID={`coach-dot-offline-${coach._id}`} />
+                              )}
+                              <Text
+                                style={[
+                                  styles.scheduleBadgeText,
+                                  scheduleStatus === 'online' && styles.scheduleTextOnline,
+                                  scheduleStatus === 'offline' && styles.scheduleTextOffline,
+                                  scheduleStatus === 'fully_booked' && styles.scheduleTextFullyBooked,
+                                  scheduleStatus === 'unknown' && styles.scheduleTextUnknown,
+                                ]}
+                                testID={`coach-schedule-text-${coach._id}`}
+                              >
+                                {scheduleStatus === 'online'
+                                  ? 'ONLINE'
+                                  : scheduleStatus === 'offline'
+                                  ? 'OFFLINE'
+                                  : scheduleStatus === 'fully_booked'
+                                  ? 'FULLY BOOKED'
+                                  : 'UNKNOWN'}
+                              </Text>
+                            </View>
+                          </View>
+                          {/* Coach Rating (Displayed only when reviews exist) */}
+                          {coach.rating && coach.rating.reviewCount > 0 ? (
+                            <View
+                              style={styles.coachRatingRow}
+                              testID={`coach-rating-${coach._id}`}
+                            >
+                              <Star size={12} color="#F59E0B" fill="#F59E0B" />
+                              <Text style={styles.coachRatingText}>
+                                {coach.rating.averageRating.toFixed(1)}
+                              </Text>
+                              <Text style={styles.coachReviewCount}>
+                                ({coach.rating.reviewCount}{' '}
+                                {coach.rating.reviewCount === 1 ? 'review' : 'reviews'})
+                              </Text>
+                            </View>
+                          ) : null}
                           {profile?.hourlyRate !== undefined && profile.hourlyRate !== null ? (
                             <Text
                               style={styles.coachRate}
@@ -541,9 +606,9 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: RADII.full,
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderWidth: 1,
-    borderColor: '#D9F99D',
+    borderColor: '#FED7AA',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
@@ -701,10 +766,83 @@ const styles = StyleSheet.create({
   cardHeaderText: {
     flex: 1,
   },
+  cardNameAndBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.xs,
+  },
   coachName: {
     ...TYPOGRAPHY.bodyBold,
     fontSize: 16,
     color: COLORS.navy,
+    flexShrink: 1,
+  },
+  scheduleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADII.full,
+    gap: 4,
+  },
+  scheduleBadgeOnline: {
+    backgroundColor: '#ECFDF5',
+  },
+  scheduleBadgeOffline: {
+    backgroundColor: '#F3F4F6',
+  },
+  scheduleBadgeFullyBooked: {
+    backgroundColor: '#FEF3C7',
+  },
+  scheduleBadgeUnknown: {
+    backgroundColor: '#F3F4F6',
+  },
+  dotOnline: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  dotOffline: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#9CA3AF',
+  },
+  scheduleBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  scheduleTextOnline: {
+    color: '#065F46',
+  },
+  scheduleTextOffline: {
+    color: '#6B7280',
+  },
+  scheduleTextFullyBooked: {
+    color: '#92400E',
+  },
+  scheduleTextUnknown: {
+    color: '#6B7280',
+  },
+  coachRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  coachRatingText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.navy,
+  },
+  coachReviewCount: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.textMuted,
   },
   coachRate: {
     fontSize: 14,
@@ -731,9 +869,9 @@ const styles = StyleSheet.create({
     borderRadius: RADII.xs,
   },
   cardDisciplineChipMatch: {
-    backgroundColor: COLORS.limeSubtle,
+    backgroundColor: COLORS.orangeSubtle,
     borderWidth: 1,
-    borderColor: '#D9F99D',
+    borderColor: '#FED7AA',
   },
   cardDisciplineChipText: {
     fontSize: 10,

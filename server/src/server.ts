@@ -2,6 +2,7 @@ import http from 'http';
 import { app } from './app';
 import { config } from './config/env';
 import { connectDatabase, disconnectDatabase } from './config/db';
+import { migrateScheduleLockIndexes } from './utils/scheduleLock';
 
 export interface RunningServer {
   httpServer: http.Server;
@@ -14,7 +15,10 @@ export async function startServer(): Promise<RunningServer> {
   // 1. Establish database connection (fails clearly if unreachable/invalid)
   await connectDatabase();
 
-  // 2. Start HTTP listener
+  // 2. Execute distributed schedule lock index migration before listening
+  await migrateScheduleLockIndexes();
+
+  // 3. Start HTTP listener
   const httpServer = http.createServer(app);
 
   await new Promise<void>((resolve, reject) => {

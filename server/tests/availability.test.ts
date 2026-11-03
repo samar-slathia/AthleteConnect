@@ -3,6 +3,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import { app } from '../src/app';
 import { User } from '../src/models/User';
+import { Booking } from '../src/models/Booking';
 import {
   CoachAvailability,
   DEFAULT_TIMEZONE,
@@ -874,6 +875,97 @@ describe('Coach Availability Backend Tests', () => {
       expect(res.status).toBe(500);
       expect(res.body.error).toBeDefined();
       expect(res.body.isConfigured).toBeUndefined();
+    });
+
+    it('rejects removing a slot that contains an existing confirmed booking with 409 Conflict', async () => {
+      // Confirmed booking exists on future Monday (2028-11-06 is a Monday) from 09:00 to 11:00
+      const futureConfirmedBooking = {
+        _id: new mongoose.Types.ObjectId(),
+        coachId,
+        date: '2028-11-06',
+        startTime: '09:00',
+        endTime: '11:00',
+        startMinutes: 540,
+        endMinutes: 660,
+        status: 'accepted',
+      };
+
+      vi.spyOn(Booking, 'find').mockResolvedValue([futureConfirmedBooking] as any);
+
+      // Attempting to remove Monday 09:00-12:00 slot (or keep only Tuesday)
+      const proposedPayload = {
+        slots: [{ dayOfWeek: 'tuesday', startTime: '10:00', endTime: '14:00' }],
+      };
+
+      const res = await request(app)
+        .put('/api/coach/availability/me')
+        .set('Authorization', `Bearer ${validCoachToken}`)
+        .send(proposedPayload);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('conflicts with an existing confirmed booking on 2028-11-06 (09:00–11:00)');
+    });
+
+    it('rejects adding a blackout date that hits an existing confirmed booking with 409 Conflict', async () => {
+      const futureConfirmedBooking = {
+        _id: new mongoose.Types.ObjectId(),
+        coachId,
+        date: '2028-11-06',
+        startTime: '09:00',
+        endTime: '11:00',
+        startMinutes: 540,
+        endMinutes: 660,
+        status: 'in_progress',
+      };
+
+      vi.spyOn(Booking, 'find').mockResolvedValue([futureConfirmedBooking] as any);
+
+      // Coach attempts to add 2028-11-06 as a blackout date
+      const proposedPayload = {
+        slots: [{ dayOfWeek: 'monday', startTime: '08:00', endTime: '12:00' }],
+        unavailableDates: ['2028-11-06'],
+      };
+
+      const res = await request(app)
+        .put('/api/coach/availability/me')
+        .set('Authorization', `Bearer ${validCoachToken}`)
+        .send(proposedPayload);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('conflicts with an existing confirmed booking on 2028-11-06');
+      expect(res.body.error).toContain('Adding blackout date 2028-11-06 would invalidate this booking');
+    });
+
+    it('atomically increments availabilityVersion when saving changes', async () => {
+      const payload = {
+        slots: [{ dayOfWeek: 'friday', startTime: '14:00', endTime: '18:00' }],
+      };
+
+      const savedDoc = new CoachAvailability({
+        userId: coachId,
+        timezone: 'Asia/Kolkata',
+        slots: payload.slots,
+        unavailableDates: [],
+        availabilityVersion: 2,
+      });
+
+      const findOneAndUpdateSpy = vi
+        .spyOn(CoachAvailability, 'findOneAndUpdate')
+        .mockResolvedValue(savedDoc);
+
+      const res = await request(app)
+        .put('/api/coach/availability/me')
+        .set('Authorization', `Bearer ${validCoachToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(findOneAndUpdateSpy).toHaveBeenCalledWith(
+        { userId: coachId.toString() },
+        expect.objectContaining({
+          $inc: expect.objectContaining({ availabilityVersion: 1 }),
+        }),
+        expect.anything()
+      );
     });
   });
 });
