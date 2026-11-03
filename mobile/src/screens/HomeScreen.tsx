@@ -7,6 +7,7 @@ import { ROLES } from '../data/roles';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { Badge } from '../components/Badge';
+import { ConnectivityBanner } from '../components/ConnectivityBanner';
 import { BottomNavBar, NavTab } from '../navigation/BottomNavBar';
 import { ParentHomeView } from './home/ParentHomeView';
 import { IndividualHomeView } from './home/IndividualHomeView';
@@ -118,10 +119,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, initialTab }) => 
                 ? roleInfo.title
                 : 'Authenticated'
             }
-            variant="lime"
+            variant="orange"
           />
         </View>
       </View>
+
+      {/* Connectivity & Cached Session Indicator */}
+      <ConnectivityBanner />
 
       {/* Main Tab Content Area */}
       <View style={styles.contentArea}>
@@ -291,7 +295,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: RADII.sm,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     alignItems: 'center',
     justifyContent: 'center',
   },

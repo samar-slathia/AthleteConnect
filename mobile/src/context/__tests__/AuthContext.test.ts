@@ -123,11 +123,13 @@ describe('AuthContext', () => {
   it('restores user session when valid saved token exists and backend confirms profile', async () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue('valid_jwt_token');
     vi.spyOn(authApi, 'getMe').mockResolvedValue(mockUser);
+    const saveProfileSpy = vi.spyOn(storage, 'saveUserProfile').mockResolvedValue();
 
     const auth = await harness.render();
 
     expect(storage.getToken).toHaveBeenCalledTimes(1);
     expect(authApi.getMe).toHaveBeenCalledWith('valid_jwt_token');
+    expect(saveProfileSpy).toHaveBeenCalledWith(mockUser);
     expect(auth.user).toEqual(mockUser);
     expect(auth.token).toBe('valid_jwt_token');
     expect(auth.isLoading).toBe(false);
@@ -138,11 +140,13 @@ describe('AuthContext', () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue('expired_jwt_token');
     vi.spyOn(authApi, 'getMe').mockRejectedValue(new AuthApiError('Invalid or expired token.', 401));
     const removeSpy = vi.spyOn(storage, 'removeToken').mockResolvedValue();
+    const removeProfileSpy = vi.spyOn(storage, 'removeUserProfile').mockResolvedValue();
 
     const auth = await harness.render();
 
     expect(authApi.getMe).toHaveBeenCalledWith('expired_jwt_token');
     expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(removeProfileSpy).toHaveBeenCalledTimes(1);
     expect(auth.user).toBeNull();
     expect(auth.token).toBeNull();
     expect(auth.isLoading).toBe(false);
@@ -152,11 +156,13 @@ describe('AuthContext', () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue('deactivated_jwt_token');
     vi.spyOn(authApi, 'getMe').mockRejectedValue(new AuthApiError('Account is deactivated.', 403));
     const removeSpy = vi.spyOn(storage, 'removeToken').mockResolvedValue();
+    const removeProfileSpy = vi.spyOn(storage, 'removeUserProfile').mockResolvedValue();
 
     const auth = await harness.render();
 
     expect(authApi.getMe).toHaveBeenCalledWith('deactivated_jwt_token');
     expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(removeProfileSpy).toHaveBeenCalledTimes(1);
     expect(auth.user).toBeNull();
     expect(auth.token).toBeNull();
     expect(auth.isLoading).toBe(false);
@@ -164,6 +170,7 @@ describe('AuthContext', () => {
 
   it('does NOT delete saved token when restoration fails solely due to temporary network disconnect', async () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue('persisted_token');
+    vi.spyOn(storage, 'getUserProfile').mockResolvedValue(null);
     vi.spyOn(authApi, 'getMe').mockRejectedValue(
       new AuthApiError('Unable to connect to AthleteConnect servers.', 0)
     );
@@ -180,9 +187,28 @@ describe('AuthContext', () => {
     expect(auth.error).toContain('Unable to connect to AthleteConnect servers');
   });
 
-  it('successfully logs in, securely saves token, and updates user state', async () => {
+  it('restores offline session using cached user profile when network is disconnected', async () => {
+    vi.spyOn(storage, 'getToken').mockResolvedValue('persisted_token_offline');
+    vi.spyOn(storage, 'getUserProfile').mockResolvedValue(mockUser);
+    vi.spyOn(authApi, 'getMe').mockRejectedValue(
+      new AuthApiError('Unable to connect to AthleteConnect servers.', 0)
+    );
+    const removeSpy = vi.spyOn(storage, 'removeToken').mockResolvedValue();
+
+    const auth = await harness.render();
+
+    expect(authApi.getMe).toHaveBeenCalledWith('persisted_token_offline');
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(auth.user).toEqual(mockUser);
+    expect(auth.token).toBe('persisted_token_offline');
+    expect(auth.isLoading).toBe(false);
+    expect(auth.error).toContain('Offline mode');
+  });
+
+  it('successfully logs in, securely saves token and profile, and updates user state', async () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue(null);
     const saveSpy = vi.spyOn(storage, 'saveToken').mockResolvedValue();
+    const saveProfileSpy = vi.spyOn(storage, 'saveUserProfile').mockResolvedValue();
     vi.spyOn(authApi, 'login').mockResolvedValue({
       token: 'new_login_token',
       user: mockUser,
@@ -198,6 +224,7 @@ describe('AuthContext', () => {
       password: 'SecurePassword123!',
     });
     expect(saveSpy).toHaveBeenCalledWith('new_login_token');
+    expect(saveProfileSpy).toHaveBeenCalledWith(mockUser);
 
     const updated = harness.getContext();
     expect(updated.user).toEqual(mockUser);
@@ -295,10 +322,11 @@ describe('AuthContext', () => {
     await call1;
   });
 
-  it('logout removes saved token and wipes in-memory auth state', async () => {
+  it('logout removes saved token and user profile snapshot, wiping in-memory auth state', async () => {
     vi.spyOn(storage, 'getToken').mockResolvedValue('active_token');
     vi.spyOn(authApi, 'getMe').mockResolvedValue(mockUser);
     const removeSpy = vi.spyOn(storage, 'removeToken').mockResolvedValue();
+    const removeProfileSpy = vi.spyOn(storage, 'removeUserProfile').mockResolvedValue();
 
     await harness.render();
     const auth = harness.getContext();
@@ -307,6 +335,7 @@ describe('AuthContext', () => {
     await auth.logout();
 
     expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(removeProfileSpy).toHaveBeenCalledTimes(1);
     const afterLogout = harness.getContext();
     expect(afterLogout.user).toBeNull();
     expect(afterLogout.token).toBeNull();

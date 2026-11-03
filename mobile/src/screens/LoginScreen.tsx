@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,22 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, AlertCircle, Eye, EyeOff, Mail, Lock, Zap } from 'lucide-react-native';
+import { ArrowLeft, AlertCircle, Eye, EyeOff, Mail, Lock, Zap, Phone } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { Button } from '../components/Button';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
+import {
+  getRememberedPhone,
+  saveRememberedPhone,
+  clearRememberedPhone,
+} from '../utils/storage';
 
 export type LoginScreenNavProps = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
 export interface LoginScreenProps {
+  initialPhone?: string;
   onNavigateToRegister?: () => void;
   onBack?: () => void;
   navigation?: LoginScreenNavProps['navigation'];
@@ -27,9 +33,11 @@ export interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
+  initialPhone,
   onNavigateToRegister,
   onBack,
   navigation,
+  route,
 }) => {
   const insets = useSafeAreaInsets();
   const { login, isLoading: authLoading, error: authError, clearError } = useAuth();
@@ -39,6 +47,58 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Remembered phone state
+  const [rememberedPhone, setRememberedPhone] = useState<string | null>(initialPhone || null);
+  const [showAddPhone, setShowAddPhone] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadPhone() {
+      try {
+        const stored = await getRememberedPhone();
+        if (isMounted && stored) {
+          setRememberedPhone(stored);
+        }
+      } catch {
+        // Fail silently without disrupting login
+      }
+    }
+
+    if (initialPhone) {
+      saveRememberedPhone(initialPhone).catch(() => {});
+    } else {
+      loadPhone();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialPhone]);
+
+  const handleClearRememberedPhone = async () => {
+    try {
+      await clearRememberedPhone();
+    } catch {
+      // Fail silently
+    }
+    setRememberedPhone(null);
+  };
+
+  const handleSavePhone = async () => {
+    const trimmed = phoneInput.trim();
+    if (!trimmed) return;
+    try {
+      await saveRememberedPhone(trimmed);
+      setRememberedPhone(trimmed);
+      setPhoneInput('');
+      setShowAddPhone(false);
+    } catch {
+      // Fail safely
+    }
+  };
 
   const handleBack = () => {
     if (onBack) {
@@ -159,6 +219,84 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
         {/* Login Form Card */}
         <View style={styles.form}>
+          {/* Remembered Phone Badge (if previously saved on this device) */}
+          {rememberedPhone ? (
+            <View style={styles.rememberedPhoneCard} testID="remembered-phone-card">
+              <View style={styles.rememberedPhoneContent}>
+                <View style={styles.phoneIconBadge}>
+                  <Phone size={14} color={COLORS.orange} />
+                </View>
+                <View style={styles.rememberedPhoneDetails}>
+                  <Text style={styles.rememberedPhoneLabel}>Remembered Phone</Text>
+                  <Text style={styles.rememberedPhoneValue} testID="remembered-phone-text">
+                    {rememberedPhone}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={handleClearRememberedPhone}
+                style={styles.clearPhoneButton}
+                accessibilityRole="button"
+                accessibilityLabel="Clear remembered phone number"
+                testID="btn-clear-remembered-phone"
+              >
+                <Text style={styles.clearPhoneText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {/* Optional inline toggle to remember a phone number on this device */}
+          {!rememberedPhone && !showAddPhone ? (
+            <TouchableOpacity
+              onPress={() => setShowAddPhone(true)}
+              style={styles.addPhoneToggle}
+              accessibilityRole="button"
+              accessibilityLabel="Remember phone number on this device"
+              testID="btn-toggle-remember-phone"
+            >
+              <Phone size={13} color={COLORS.orange} />
+              <Text style={styles.addPhoneToggleText}>Remember phone number on this device</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {showAddPhone && !rememberedPhone ? (
+            <View style={styles.addPhoneBox} testID="add-phone-box">
+              <Text style={styles.inputLabel}>Mobile Phone Number</Text>
+              <View style={styles.inputWrapper}>
+                <Phone size={18} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="+1 (555) 000-0000"
+                  placeholderTextColor={COLORS.textMuted}
+                  value={phoneInput}
+                  onChangeText={setPhoneInput}
+                  keyboardType="phone-pad"
+                  accessibilityLabel="Phone Number input"
+                  testID="input-remember-phone"
+                />
+              </View>
+              <View style={styles.phoneActionButtons}>
+                <TouchableOpacity
+                  onPress={handleSavePhone}
+                  style={styles.savePhoneBtn}
+                  testID="btn-save-phone"
+                >
+                  <Text style={styles.savePhoneBtnText}>Save</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowAddPhone(false);
+                    setPhoneInput('');
+                  }}
+                  style={styles.cancelPhoneBtn}
+                  testID="btn-cancel-phone"
+                >
+                  <Text style={styles.cancelPhoneBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
           {/* Email Address */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Email Address</Text>
@@ -303,7 +441,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: RADII.sm,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -350,6 +488,107 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  rememberedPhoneCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.mist,
+    borderRadius: RADII.md,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  rememberedPhoneContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    flex: 1,
+  },
+  phoneIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: RADII.full,
+    backgroundColor: COLORS.orangeSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rememberedPhoneDetails: {
+    flex: 1,
+  },
+  rememberedPhoneLabel: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  rememberedPhoneValue: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 13,
+    color: COLORS.navy,
+  },
+  clearPhoneButton: {
+    paddingVertical: 4,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADII.sm,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  clearPhoneText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  addPhoneToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: SPACING.md,
+    paddingVertical: 4,
+  },
+  addPhoneToggleText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.orange,
+    fontWeight: '600',
+  },
+  addPhoneBox: {
+    backgroundColor: COLORS.mist,
+    padding: SPACING.sm,
+    borderRadius: RADII.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  phoneActionButtons: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginTop: SPACING.xs,
+    justifyContent: 'flex-end',
+  },
+  savePhoneBtn: {
+    backgroundColor: COLORS.orange,
+    paddingVertical: 6,
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADII.sm,
+  },
+  savePhoneBtnText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  cancelPhoneBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: SPACING.sm,
+  },
+  cancelPhoneBtnText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textSecondary,
+    fontSize: 12,
   },
   inputGroup: {
     marginBottom: SPACING.lg,

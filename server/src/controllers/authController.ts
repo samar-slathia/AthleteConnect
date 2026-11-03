@@ -166,6 +166,7 @@ export async function login(
     // Check account status
     if (!user.isActive) {
       return res.status(403).json({
+        code: 'ACCOUNT_DEACTIVATED',
         error: 'Account has been deactivated. Please contact support.',
       });
     }

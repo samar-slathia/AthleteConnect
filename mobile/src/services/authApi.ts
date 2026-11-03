@@ -1,5 +1,6 @@
 import { RoleId } from '../data/roles';
 import { getApiBaseUrl, API_ENDPOINTS } from '../config/api';
+import { handleProtectedResponseError } from './authEvents';
 
 export type CustomerRole = RoleId;
 
@@ -47,40 +48,62 @@ export class AuthApiError extends Error {
   }
 }
 
+interface ParsedApiError {
+  message: string;
+  code?: string;
+}
+
 /**
- * Safely extracts user-friendly error message from backend error responses.
+ * Safely extracts user-friendly error message and optional machine-readable error code from backend error responses.
  */
-async function parseResponseError(response: Response): Promise<string> {
+async function parseResponseError(response: Response): Promise<ParsedApiError> {
+  let message: string | undefined;
+  let code: string | undefined;
+
   try {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const data = await response.json();
       if (data && typeof data.error === 'string' && data.error.trim()) {
-        return data.error;
+        message = data.error.trim();
+      }
+      if (data && typeof data.code === 'string' && data.code.trim()) {
+        code = data.code.trim();
       }
     }
   } catch {
     // Non-JSON or unreadable body, fall back to status code defaults below
   }
 
-  switch (response.status) {
-    case 400:
-      return 'Invalid request. Please check your inputs.';
-    case 401:
-      return 'Invalid email or password.';
-    case 403:
-      return 'Account is deactivated. Please contact support.';
-    case 404:
-      return 'Authentication service endpoint was not found.';
-    case 409:
-      return 'An account with this email address already exists.';
-    case 500:
-    case 502:
-    case 503:
-      return 'Server error. Please try again later.';
-    default:
-      return `Request failed with status ${response.status}.`;
+  if (!message) {
+    switch (response.status) {
+      case 400:
+        message = 'Invalid request. Please check your inputs.';
+        break;
+      case 401:
+        message = 'Invalid email or password.';
+        break;
+      case 403:
+        message = 'Account is deactivated. Please contact support.';
+        break;
+      case 404:
+        message = 'Authentication service endpoint was not found.';
+        break;
+      case 409:
+        message = 'An account with this email address already exists.';
+        break;
+      case 500:
+      case 502:
+      case 503:
+        message = 'Server error. Please try again later.';
+        break;
+      default:
+        message = `Request failed with status ${response.status}.`;
+        break;
+    }
   }
+
+  return { message, code };
 }
 
 /**
@@ -94,6 +117,25 @@ async function safeFetch(url: string, options: RequestInit): Promise<Response> {
       'Unable to connect to AthleteConnect servers. Please check your internet connection.',
       0
     );
+  }
+}
+
+/**
+ * Checks backend health endpoint to monitor transport reachability.
+ * GET /api/health
+ */
+export async function probeBackendHealth(): Promise<{ reachable: boolean; status?: number }> {
+  try {
+    const url = `${getApiBaseUrl()}/api/health`;
+    const response = await safeFetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+    return { reachable: true, status: response.status };
+  } catch {
+    return { reachable: false };
   }
 }
 
@@ -114,8 +156,8 @@ export async function register(payload: RegisterPayload): Promise<AuthResponse> 
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
-    throw new AuthApiError(errorMessage, response.status);
+    const { message } = await parseResponseError(response);
+    throw new AuthApiError(message, response.status);
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -139,8 +181,8 @@ export async function login(payload: LoginPayload): Promise<AuthResponse> {
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
-    throw new AuthApiError(errorMessage, response.status);
+    const { message } = await parseResponseError(response);
+    throw new AuthApiError(message, response.status);
   }
 
   const data = (await response.json()) as AuthResponse;
@@ -167,10 +209,10 @@ export async function getMe(token: string): Promise<UserProfile> {
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
-    throw new AuthApiError(errorMessage, response.status);
+    const { message, code } = await parseResponseError(response);
+    handleProtectedResponseError(response.status, message, token.trim(), code);
+    throw new AuthApiError(message, response.status);
   }
-
   const data = (await response.json()) as { user: UserProfile };
   return data.user;
 }

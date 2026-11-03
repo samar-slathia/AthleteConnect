@@ -1,5 +1,6 @@
 import { getApiBaseUrl, API_ENDPOINTS } from '../config/api';
 import { AuthApiError } from './authApi';
+import { handleProtectedResponseError } from './authEvents';
 import { CoachDiscipline, VenueType, ActiveVenueType, ACTIVE_VENUE_TYPES } from './coachApi';
 import { isValidCalendarDate } from './availabilityApi';
 
@@ -92,37 +93,55 @@ export interface CreateBookingPayload {
 /**
  * Safely extracts user-friendly error message from backend error responses.
  */
-async function parseResponseError(response: Response): Promise<string> {
+async function parseResponseError(response: Response, token?: string): Promise<string> {
+  let message: string | undefined;
+  let code: string | undefined;
+
   try {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const data = await response.json();
       if (data && typeof data.error === 'string' && data.error.trim()) {
-        return data.error;
+        message = data.error.trim();
+      }
+      if (data && typeof data.code === 'string' && data.code.trim()) {
+        code = data.code.trim();
       }
     }
   } catch {
     // Non-JSON or unreadable body, fall back to status code defaults
   }
 
-  switch (response.status) {
-    case 400:
-      return 'Invalid booking request. Please check your inputs.';
-    case 401:
-      return 'Authentication required. Please log in again.';
-    case 403:
-      return 'Access denied. You are not authorized for this booking action.';
-    case 404:
-      return 'Booking or coach was not found.';
-    case 409:
-      return 'Schedule conflict. The coach already has an accepted session at this time.';
-    case 500:
-    case 502:
-    case 503:
-      return 'Server error. Please try again later.';
-    default:
-      return `Request failed with status ${response.status}.`;
+  if (!message) {
+    switch (response.status) {
+      case 400:
+        message = 'Invalid booking request. Please check your inputs.';
+        break;
+      case 401:
+        message = 'Authentication required. Please log in again.';
+        break;
+      case 403:
+        message = 'Access denied. You are not authorized for this booking action.';
+        break;
+      case 404:
+        message = 'Booking or coach was not found.';
+        break;
+      case 409:
+        message = 'Schedule conflict. The coach already has an accepted session at this time.';
+        break;
+      case 500:
+      case 502:
+      case 503:
+        message = 'Server error. Please try again later.';
+        break;
+      default:
+        message = `Request failed with status ${response.status}.`;
+        break;
+    }
   }
+
+  handleProtectedResponseError(response.status, message, token, code);
+  return message;
 }
 
 /**
@@ -166,7 +185,7 @@ export async function getPublicCoaches(params?: {
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -200,7 +219,7 @@ export async function createBooking(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -237,7 +256,7 @@ export async function getCustomerBookings(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -276,7 +295,7 @@ export async function cancelBooking(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -327,7 +346,7 @@ export async function acceptBooking(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -370,7 +389,7 @@ export async function rejectBooking(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -613,7 +632,7 @@ export async function getBookingMessages(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -661,7 +680,7 @@ export async function sendBookingMessage(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 

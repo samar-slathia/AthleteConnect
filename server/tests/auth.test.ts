@@ -287,6 +287,7 @@ describe('Authentication & Authorization API (Isolated Tests)', () => {
         });
 
       expect(response.status).toBe(403);
+      expect(response.body.code).toBe('ACCOUNT_DEACTIVATED');
       expect(response.body.error).toContain('deactivated');
     });
 
@@ -426,6 +427,7 @@ describe('Authentication & Authorization API (Isolated Tests)', () => {
         .set('Authorization', `Bearer ${token}`);
 
       expect(response.status).toBe(403);
+      expect(response.body.code).toBe('ACCOUNT_DEACTIVATED');
       expect(response.body.error).toContain('deactivated');
     });
   });
@@ -490,6 +492,7 @@ describe('Authentication & Authorization API (Isolated Tests)', () => {
         .set('Authorization', `Bearer ${token}`);
 
       expect(response.status).toBe(403);
+      expect(response.body.code).toBeUndefined();
       expect(response.body.error).toContain('Access forbidden. Required role: coach');
     });
 

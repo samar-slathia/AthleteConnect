@@ -1,5 +1,6 @@
 import { getApiBaseUrl, API_ENDPOINTS } from '../config/api';
 import { AuthApiError } from './authApi';
+import { handleProtectedResponseError } from './authEvents';
 
 export const DAYS_OF_WEEK = [
   'monday',
@@ -83,43 +84,59 @@ export interface UpdateCoachAvailabilityInput {
 /**
  * Safely extracts user-friendly error message from backend error responses.
  */
-async function parseResponseError(response: Response): Promise<string> {
+async function parseResponseError(response: Response, token?: string): Promise<string> {
+  let message: string | undefined;
+  let code: string | undefined;
+
   try {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const data = await response.json();
       if (data && typeof data.error === 'string' && data.error.trim()) {
-        return data.error;
-      }
-      if (
+        message = data.error.trim();
+      } else if (
         data &&
         typeof data.error === 'object' &&
         typeof data.error.message === 'string' &&
         data.error.message.trim()
       ) {
-        return data.error.message;
+        message = data.error.message.trim();
+      }
+      if (data && typeof data.code === 'string' && data.code.trim()) {
+        code = data.code.trim();
       }
     }
   } catch {
     // Non-JSON or unreadable body, fall back to status code defaults below
   }
 
-  switch (response.status) {
-    case 400:
-      return 'Invalid request. Please check your inputs.';
-    case 401:
-      return 'Authentication required. Please log in again.';
-    case 403:
-      return 'Access denied. Coach privileges required.';
-    case 404:
-      return 'Coach availability service endpoint was not found.';
-    case 500:
-    case 502:
-    case 503:
-      return 'Server error. Please try again later.';
-    default:
-      return `Request failed with status ${response.status}.`;
+  if (!message) {
+    switch (response.status) {
+      case 400:
+        message = 'Invalid request. Please check your inputs.';
+        break;
+      case 401:
+        message = 'Authentication required. Please log in again.';
+        break;
+      case 403:
+        message = 'Access denied. Coach privileges required.';
+        break;
+      case 404:
+        message = 'Coach availability service endpoint was not found.';
+        break;
+      case 500:
+      case 502:
+      case 503:
+        message = 'Server error. Please try again later.';
+        break;
+      default:
+        message = `Request failed with status ${response.status}.`;
+        break;
+    }
   }
+
+  handleProtectedResponseError(response.status, message, token, code);
+  return message;
 }
 
 /**
@@ -370,7 +387,7 @@ export async function getCoachAvailability(token: string): Promise<CoachAvailabi
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 
@@ -442,7 +459,7 @@ export async function updateCoachAvailability(
   });
 
   if (!response.ok) {
-    const errorMessage = await parseResponseError(response);
+    const errorMessage = await parseResponseError(response, token);
     throw new AuthApiError(errorMessage, response.status);
   }
 

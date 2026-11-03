@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import { getApiBaseUrl, API_ENDPOINTS } from '../config/api';
 import { AuthContext } from '../context/AuthContext';
+import { handleProtectedResponseError } from './authEvents';
 
 export const PROFILE_PHOTO_KEY_PREFIX = 'athleteconnect_profile_photo_';
 export const PROFILE_PHOTO_SYNC_KEY_PREFIX = 'athleteconnect_profile_photo_sync_';
@@ -172,12 +173,17 @@ export async function uploadProfilePhotoToCloud(
 
     if (res.status !== 200) {
       let errorMsg = `Upload failed with status ${res.status}.`;
+      let code: string | undefined;
       try {
         const body = JSON.parse(res.body);
         if (body && typeof body.error === 'string') {
           errorMsg = body.error;
         }
+        if (body && typeof body.code === 'string') {
+          code = body.code;
+        }
       } catch {}
+      handleProtectedResponseError(res.status, errorMsg, token.trim(), code);
       throw new Error(errorMsg);
     }
 
@@ -203,12 +209,17 @@ export async function uploadProfilePhotoToCloud(
 
   if (!response.ok) {
     let errorMsg = `Upload failed with status ${response.status}.`;
+    let code: string | undefined;
     try {
       const data = await response.json();
       if (data && typeof data.error === 'string') {
         errorMsg = data.error;
       }
+      if (data && typeof data.code === 'string') {
+        code = data.code;
+      }
     } catch {}
+    handleProtectedResponseError(response.status, errorMsg, token.trim(), code);
     throw new Error(errorMsg);
   }
 
@@ -263,6 +274,11 @@ export async function downloadProfilePhotoFromCloud(
       } else if (downloadRes.status === 404) {
         return null;
       } else {
+        handleProtectedResponseError(
+          downloadRes.status,
+          `Download failed with status ${downloadRes.status}.`,
+          token.trim()
+        );
         throw new Error(`Download failed with status ${downloadRes.status}.`);
       }
     }
@@ -297,7 +313,15 @@ export async function downloadProfilePhotoFromCloud(
   } else if (res.status === 404) {
     return null;
   } else {
-    throw new Error(`Download failed with status ${res.status}.`);
+    let errorMsg = `Download failed with status ${res.status}.`;
+    let code: string | undefined;
+    try {
+      const data = await res.json();
+      if (data && typeof data.error === 'string') errorMsg = data.error;
+      if (data && typeof data.code === 'string') code = data.code;
+    } catch {}
+    handleProtectedResponseError(res.status, errorMsg, token.trim(), code);
+    throw new Error(errorMsg);
   }
 }
 
@@ -321,12 +345,17 @@ export async function deleteProfilePhotoFromCloud(token: string): Promise<void> 
 
   if (!res.ok && res.status !== 404) {
     let errorMsg = `Delete failed with status ${res.status}.`;
+    let code: string | undefined;
     try {
       const data = await res.json();
       if (data && typeof data.error === 'string') {
         errorMsg = data.error;
       }
+      if (data && typeof data.code === 'string') {
+        code = data.code;
+      }
     } catch {}
+    handleProtectedResponseError(res.status, errorMsg, token.trim(), code);
     throw new Error(errorMsg);
   }
 }
