@@ -4,11 +4,13 @@ import {
   getPublicCoachById,
   getPublicCoachPhoto,
 } from '../controllers/coachDiscoveryController';
+import { getCoachReviews } from '../controllers/reviewController';
 
 export const coachDiscoveryRouter = Router();
 
 // Public / Authenticated Coach Discovery
 coachDiscoveryRouter.get('/', getPublicCoaches);
 coachDiscoveryRouter.get('/:id/photo', getPublicCoachPhoto);
+coachDiscoveryRouter.get('/:id/reviews', getCoachReviews);
 coachDiscoveryRouter.get('/:id', getPublicCoachById);
 

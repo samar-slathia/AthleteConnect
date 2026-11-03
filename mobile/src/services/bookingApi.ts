@@ -34,6 +34,8 @@ export interface CoachDiscoveryItem {
   profile: CoachDiscoveryProfile | null;
   isConfiguredAvailability: boolean;
   timezone: string;
+  rating?: CoachRatingSummary;
+  reviews?: CoachReviewItem[];
 }
 
 export interface BookingCoordinates {
@@ -68,6 +70,8 @@ export interface BookingItem {
   sessionStartedAt?: string;
   expectedEndedAt?: string;
   completedAt?: string;
+  isRated?: boolean;
+  review?: BookingReview | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -475,6 +479,110 @@ export async function completeBooking(
  * Submit a rating & review for a completed booking.
  * POST /api/bookings/:id/review
  */
+
+
+/**
+ * Submit a rating & review for a completed booking.
+ * POST /api/bookings/:id/review
+ */
+export async function submitBookingReview(
+  bookingId: string,
+  payload: { rating: number; reviewText?: string },
+  token: string
+): Promise<{ message: string; review: BookingReview }> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required to submit review.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.BOOKINGS}/${encodeURIComponent(bookingId.trim())}/review`;
+
+  const response = await safeFetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Retrieve review status for a specific booking.
+ * GET /api/bookings/:id/review
+ */
+export async function getBookingReview(
+  bookingId: string,
+  token: string
+): Promise<{ isRated: boolean; review: BookingReview | null }> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.BOOKINGS}/${encodeURIComponent(bookingId.trim())}/review`;
+
+  const response = await safeFetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Public coach reviews and aggregate ratings.
+ * GET /api/coaches/:id/reviews
+ */
+export async function getCoachReviews(
+  coachId: string
+): Promise<{ rating: CoachRatingSummary; reviews: CoachReviewItem[] }> {
+  if (!coachId || !coachId.trim()) {
+    throw new AuthApiError('Coach ID is required to fetch reviews.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.COACHES}/${encodeURIComponent(coachId.trim())}/reviews`;
+
+  const response = await safeFetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
 
 
 /**

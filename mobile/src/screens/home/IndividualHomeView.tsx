@@ -11,6 +11,7 @@ import { EmptyStateSection } from './components/EmptyStateSection';
 import { CustomerBookingCard } from './components/CustomerBookingCard';
 import { BookingRequestModal } from './components/BookingRequestModal';
 import { BookingChatModal } from './components/BookingChatModal';
+import { RatingModal } from './components/RatingModal';
 import { Button } from '../../components/Button';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 
@@ -39,6 +40,7 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [activeChatBooking, setActiveChatBooking] = useState<BookingItem | null>(null);
+  const [selectedBookingForRating, setSelectedBookingForRating] = useState<BookingItem | null>(null);
 
   const loadBookings = useCallback(async () => {
     if (!effectiveToken) return;
@@ -267,6 +269,7 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
                   onCancel={handleCancelBooking}
                   isCancelling={cancellingBookingId === booking._id}
                   onOpenChat={(b) => setActiveChatBooking(b)}
+                  onRate={(b) => setSelectedBookingForRating(b)}
                 />
               ))}
             </View>
@@ -319,6 +322,19 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
         currentUserRole="individual"
         currentUserId={user._id}
       />
+
+      {/* Customer Rating & Review Modal */}
+      <RatingModal
+        visible={Boolean(selectedBookingForRating)}
+        onClose={() => setSelectedBookingForRating(null)}
+        booking={selectedBookingForRating}
+        token={effectiveToken}
+        onSuccess={(bookingId, review) => {
+          setBookings((prev) =>
+            prev.map((b) => (b._id === bookingId ? { ...b, isRated: true, review } : b))
+          );
+        }}
+      />
     </View>
   );
 };
@@ -360,7 +376,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     paddingHorizontal: 8,
     borderRadius: RADII.sm,
-    backgroundColor: COLORS.lime,
+    backgroundColor: COLORS.orange,
   },
   headerActionText: {
     ...TYPOGRAPHY.caption,

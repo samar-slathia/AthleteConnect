@@ -13,6 +13,10 @@ import {
   getBookingMessages,
   sendBookingMessage,
 } from '../controllers/chatController';
+import {
+  submitBookingReview,
+  getBookingReview,
+} from '../controllers/reviewController';
 import { authenticate, requireRole } from '../middleware/auth';
 
 export const bookingRouter = Router();
@@ -40,6 +44,15 @@ bookingRouter.patch('/:id/start', authenticate, requireRole('coach'), startBooki
 
 // Complete accepted or in-progress session (Assigned coach only)
 bookingRouter.patch('/:id/complete', authenticate, requireRole('coach'), completeBooking);
+
+// Booking-linked Rating & Reviews
+bookingRouter.post(
+  '/:id/review',
+  authenticate,
+  requireRole('parent', 'individual'),
+  submitBookingReview
+);
+bookingRouter.get('/:id/review', authenticate, getBookingReview);
 
 // Booking-linked Chat Messages
 bookingRouter.get('/:id/messages', authenticate, getBookingMessages);

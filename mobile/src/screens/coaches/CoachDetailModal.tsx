@@ -16,6 +16,7 @@ import {
   CheckCircle,
   Home,
   Navigation,
+  Star,
 } from 'lucide-react-native';
 import { CoachDiscoveryItem, CoachDiscipline } from '../../services/bookingApi';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
@@ -51,6 +52,12 @@ export const CoachDetailModal: React.FC<CoachDetailModalProps> = ({
   );
 
   const photoUrl = getPublicCoachPhotoUrl(coach._id);
+
+  const scheduleStatus =
+    coach.schedule?.dateStatus ??
+    (coach.isConfiguredAvailability !== undefined
+      ? (coach.isConfiguredAvailability ? 'online' : 'offline')
+      : 'unknown');
 
   const handleChoose = () => {
     onChooseCoach(coach, selectedDiscipline);
@@ -99,6 +106,56 @@ export const CoachDetailModal: React.FC<CoachDetailModalProps> = ({
               <Text style={styles.coachName} testID="coach-detail-name">
                 {coach.name}
               </Text>
+
+              {/* Schedule Status Badge */}
+              <View
+                style={[
+                  styles.scheduleBadge,
+                  scheduleStatus === 'online' && styles.scheduleBadgeOnline,
+                  scheduleStatus === 'offline' && styles.scheduleBadgeOffline,
+                  scheduleStatus === 'fully_booked' && styles.scheduleBadgeFullyBooked,
+                  scheduleStatus === 'unknown' && styles.scheduleBadgeUnknown,
+                ]}
+                testID="coach-detail-schedule-badge"
+              >
+                {scheduleStatus === 'online' && <View style={styles.dotOnline} />}
+                {scheduleStatus === 'offline' && <View style={styles.dotOffline} />}
+                <Text
+                  style={[
+                    styles.scheduleBadgeText,
+                    scheduleStatus === 'online' && styles.scheduleTextOnline,
+                    scheduleStatus === 'offline' && styles.scheduleTextOffline,
+                    scheduleStatus === 'fully_booked' && styles.scheduleTextFullyBooked,
+                    scheduleStatus === 'unknown' && styles.scheduleTextUnknown,
+                  ]}
+                  testID="coach-detail-schedule-text"
+                >
+                  {scheduleStatus === 'online'
+                    ? 'ONLINE'
+                    : scheduleStatus === 'offline'
+                    ? 'OFFLINE'
+                    : scheduleStatus === 'fully_booked'
+                    ? 'FULLY BOOKED'
+                    : 'UNKNOWN'}
+                </Text>
+              </View>
+
+              {/* Rating Summary (shown only when reviews exist) */}
+              {coach.rating && coach.rating.reviewCount > 0 ? (
+                <View
+                  style={styles.ratingHeroRow}
+                  testID="coach-detail-rating-summary"
+                >
+                  <Star size={15} color="#F59E0B" fill="#F59E0B" />
+                  <Text style={styles.ratingHeroAverage}>
+                    {coach.rating.averageRating.toFixed(1)}
+                  </Text>
+                  <Text style={styles.ratingHeroReviews}>
+                    • {coach.rating.reviewCount}{' '}
+                    {coach.rating.reviewCount === 1 ? 'Review' : 'Reviews'}
+                  </Text>
+                </View>
+              ) : null}
 
               {profile?.hourlyRate !== undefined && profile.hourlyRate !== null ? (
                 <View style={styles.rateContainer} testID="coach-detail-rate">
@@ -229,6 +286,47 @@ export const CoachDetailModal: React.FC<CoachDetailModalProps> = ({
               </Text>
             </View>
 
+            {/* Customer Reviews Section */}
+            {coach.rating && coach.rating.reviewCount > 0 ? (
+              <View style={styles.sectionContainer} testID="coach-detail-reviews-section">
+                <Text style={styles.sectionHeading}>
+                  CUSTOMER REVIEWS ({coach.rating.reviewCount})
+                </Text>
+                {coach.reviews && coach.reviews.length > 0 ? (
+                  <View style={styles.reviewsList}>
+                    {coach.reviews.map((rev) => (
+                      <View
+                        key={rev._id}
+                        style={styles.reviewCard}
+                        testID={`coach-review-card-${rev._id}`}
+                      >
+                        <View style={styles.reviewCardHeader}>
+                          <Text style={styles.reviewerName}>
+                            {rev.customerName || 'Verified Athlete'}
+                          </Text>
+                          <View style={styles.reviewStarsRow}>
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                size={12}
+                                color={star <= rev.rating ? '#F59E0B' : '#E5E7EB'}
+                                fill={star <= rev.rating ? '#F59E0B' : 'transparent'}
+                              />
+                            ))}
+                          </View>
+                        </View>
+                        {rev.reviewText ? (
+                          <Text style={styles.reviewCardText}>{rev.reviewText}</Text>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.emptyNote}>No written comments yet.</Text>
+                )}
+              </View>
+            ) : null}
+
             {/* Safety & Quality Notice */}
             <View style={styles.noticeCard}>
               <ShieldCheck size={16} color={COLORS.navy} />
@@ -308,6 +406,56 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
     textAlign: 'center',
   },
+  scheduleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADII.full,
+    gap: 4,
+    marginTop: 6,
+  },
+  scheduleBadgeOnline: {
+    backgroundColor: '#ECFDF5',
+  },
+  scheduleBadgeOffline: {
+    backgroundColor: '#F3F4F6',
+  },
+  scheduleBadgeFullyBooked: {
+    backgroundColor: '#FEF3C7',
+  },
+  scheduleBadgeUnknown: {
+    backgroundColor: '#F3F4F6',
+  },
+  dotOnline: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  dotOffline: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#9CA3AF',
+  },
+  scheduleBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  scheduleTextOnline: {
+    color: '#065F46',
+  },
+  scheduleTextOffline: {
+    color: '#6B7280',
+  },
+  scheduleTextFullyBooked: {
+    color: '#92400E',
+  },
+  scheduleTextUnknown: {
+    color: '#6B7280',
+  },
   rateContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -339,8 +487,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   disciplineChipSelected: {
-    backgroundColor: COLORS.lime,
-    borderColor: '#BFE75F',
+    backgroundColor: COLORS.orange,
+    borderColor: COLORS.orangePressed,
   },
   disciplineChipText: {
     ...TYPOGRAPHY.caption,
@@ -494,5 +642,58 @@ const styles = StyleSheet.create({
   },
   chooseButton: {
     width: '100%',
+  },
+  ratingHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  ratingHeroAverage: {
+    ...TYPOGRAPHY.body,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.navy,
+  },
+  ratingHeroReviews: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  reviewsList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  reviewCard: {
+    backgroundColor: COLORS.mist,
+    padding: SPACING.md,
+    borderRadius: RADII.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  reviewCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  reviewerName: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.navy,
+  },
+  reviewStarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  reviewCardText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12.5,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+    marginTop: 2,
   },
 });
