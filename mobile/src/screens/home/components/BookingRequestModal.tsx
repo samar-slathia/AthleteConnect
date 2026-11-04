@@ -127,6 +127,8 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const initialCoachIdRef = useRef<string | undefined>(initialCoachId);
   const initialSportRef = useRef<CoachDiscipline | undefined>(initialSport);
   const userEditedAddressRef = useRef<boolean>(false);
+  const prevVisibleRef = useRef<boolean>(false);
+  const selectedVenueRef = useRef<ActiveVenueType>(selectedVenue);
 
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -168,8 +170,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 const activeCoachVenues = coach.profile.venueTypes.filter(
                   (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
                 );
-                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenueRef.current)) {
                   setSelectedVenue(activeCoachVenues[0]);
+                  selectedVenueRef.current = activeCoachVenues[0];
                 }
               }
             } else {
@@ -186,8 +189,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 const activeCoachVenues = coach.profile.venueTypes.filter(
                   (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
                 );
-                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+                if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenueRef.current)) {
                   setSelectedVenue(activeCoachVenues[0]);
+                  selectedVenueRef.current = activeCoachVenues[0];
                 }
               }
             } else {
@@ -195,6 +199,8 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
               setFormError('The selected coach has not configured any disciplines.');
             }
           }
+          // Consume and clear initialCoachIdRef so subsequent fetches never overwrite the user's selections
+          initialCoachIdRef.current = undefined;
         }
       } catch (err: any) {
         if (currentRequestId !== fetchCoachesRequestIdRef.current) return;
@@ -205,18 +211,33 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
         }
       }
     },
-    [date, startTime, endTime, selectedSport, selectedVenue]
+    [date, startTime, endTime, selectedSport]
   );
 
-  // Set default tomorrow date in Asia/Kolkata when modal opens
+  const fetchCoachesRef = useRef(fetchCoaches);
+
+  // Synchronize latest callback and venue refs safely after commits without render-time mutations
   useEffect(() => {
-    if (visible) {
+    fetchCoachesRef.current = fetchCoaches;
+  }, [fetchCoaches]);
+
+  useEffect(() => {
+    selectedVenueRef.current = selectedVenue;
+  }, [selectedVenue]);
+
+  // Set default tomorrow date in Asia/Kolkata when modal transitions from closed to open
+  useEffect(() => {
+    const wasVisible = prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+
+    if (visible && !wasVisible) {
       locationRequestIdRef.current++;
       userEditedAddressRef.current = false;
       setIsDetectingLocation(false);
       const tomorrowDate = getKolkataTomorrowDateString();
       setDate(tomorrowDate);
       setSelectedVenue('customer_home');
+      selectedVenueRef.current = 'customer_home';
       setSelectedSport(initialSport || null);
       setSelectedCoachId('');
       setSelectedCoachLocation(null);
@@ -241,9 +262,12 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       initialCoachIdRef.current = initialCoachId;
       initialSportRef.current = initialSport;
 
-      fetchCoaches(tomorrowDate, '09:00', '10:00');
+      prevDateRef.current = tomorrowDate;
+      prevTimesRef.current = '09:00-10:00';
+
+      fetchCoachesRef.current(tomorrowDate, '09:00', '10:00');
     }
-  }, [visible, initialSport, initialCoachId, fetchCoaches]);
+  }, [visible, initialSport, initialCoachId]);
 
   // When date, startTime, or endTime changes, refresh coach schedule summaries for that date
   const prevDateRef = useRef<string>('');
@@ -257,11 +281,11 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
     if (isValidCalendarDate(date)) {
       const timer = setTimeout(() => {
-        fetchCoaches(date, startTime, endTime);
+        fetchCoachesRef.current(date, startTime, endTime);
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [date, startTime, endTime, visible, fetchCoaches]);
+  }, [date, startTime, endTime, visible]);
 
   // Request-sequence ref ensuring only the most recent package-preview request updates UI state
   const previewSequenceRef = useRef<number>(0);
@@ -417,8 +441,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       const activeCoachVenues = chosen.profile.venueTypes.filter(
         (vt): vt is ActiveVenueType => vt === 'customer_home' || vt === 'ground'
       );
-      if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenue)) {
+      if (activeCoachVenues.length > 0 && !activeCoachVenues.includes(selectedVenueRef.current)) {
         setSelectedVenue(activeCoachVenues[0]);
+        selectedVenueRef.current = activeCoachVenues[0];
       }
     }
   };
@@ -427,6 +452,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     locationRequestIdRef.current++;
     setIsDetectingLocation(false);
     setSelectedVenue(venue);
+    selectedVenueRef.current = venue;
     setSelectedCoachLocation(null);
     setDetectedCoordinates(null);
     setDetectedAddress(null);

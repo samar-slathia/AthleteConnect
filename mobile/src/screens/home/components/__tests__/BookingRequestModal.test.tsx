@@ -103,9 +103,19 @@ function createInteractiveHarness(
   const internals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
   const originalDispatcher = internals.H;
 
+  let currentProps: Record<string, any> = { ...(ui.props as any) };
   const hooks: any[] = [];
   let hookIdx = 0;
-  const effectFns: (() => void | (() => void))[] = [];
+  const pendingEffects: { idx: number; fn: () => void | (() => void) }[] = [];
+
+  const areDepsEqual = (prevDeps?: any[], nextDeps?: any[]): boolean => {
+    if (!prevDeps || !nextDeps) return false;
+    if (prevDeps.length !== nextDeps.length) return false;
+    for (let i = 0; i < prevDeps.length; i++) {
+      if (!Object.is(prevDeps[i], nextDeps[i])) return false;
+    }
+    return true;
+  };
 
   const dispatcher = {
     useState(initial: any) {
@@ -125,13 +135,23 @@ function createInteractiveHarness(
       }
       return hooks[idx];
     },
-    useCallback(fn: any) {
+    useCallback(fn: any, deps?: any[]) {
       const idx = hookIdx++;
-      hooks[idx] = fn;
+      const prev = hooks[idx];
+      if (prev && areDepsEqual(prev.deps, deps)) {
+        return prev.fn;
+      }
+      hooks[idx] = { fn, deps };
       return fn;
     },
-    useEffect(fn: any) {
-      effectFns.push(fn);
+    useEffect(fn: any, deps?: any[]) {
+      const idx = hookIdx++;
+      const prev = hooks[idx];
+      const shouldRun = !prev || !areDepsEqual(prev.deps, deps);
+      hooks[idx] = { fn, deps, cleanup: prev?.cleanup };
+      if (shouldRun) {
+        pendingEffects.push({ idx, fn });
+      }
     },
     useContext(context: any) {
       if (context === AuthContext) {
@@ -141,20 +161,44 @@ function createInteractiveHarness(
     },
   };
 
-  function renderTree() {
+  function runPendingEffects() {
+    while (pendingEffects.length > 0) {
+      const { idx, fn } = pendingEffects.shift()!;
+      if (hooks[idx]?.cleanup && typeof hooks[idx].cleanup === 'function') {
+        try {
+          hooks[idx].cleanup();
+        } catch {}
+      }
+      const cleanup = fn();
+      if (typeof cleanup === 'function') {
+        hooks[idx].cleanup = cleanup;
+      }
+    }
+  }
+
+  function renderTree(nextProps?: any) {
+    if (nextProps) {
+      currentProps = { ...currentProps, ...nextProps };
+    }
     hookIdx = 0;
+    pendingEffects.length = 0;
     internals.H = dispatcher;
     const Component = ui.type as React.FC<any>;
-    return Component(ui.props);
+    const tree = Component(currentProps);
+    runPendingEffects();
+    return tree;
   }
 
   const initialTree = renderTree();
 
-  for (const fn of effectFns) {
-    fn();
-  }
-
   const cleanup = () => {
+    for (const h of hooks) {
+      if (h?.cleanup && typeof h.cleanup === 'function') {
+        try {
+          h.cleanup();
+        } catch {}
+      }
+    }
     internals.H = originalDispatcher;
   };
 
@@ -1231,5 +1275,514 @@ describe('BookingRequestModal — Phase 3C Training Venue Rules', () => {
     expect(warningText).toContain('Coach is unavailable on 2026-11-24 (blackout date).');
 
     cleanup();
+  });
+});
+
+describe('BookingRequestModal — Priority 3: State Reset & Venue Retention Regressions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('1. Sports Ground remains selected across subsequent renders without reverting to Customer\'s House', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001', // Sensei Maya offers ['customer_home', 'ground']
+        initialSport: 'kickboxing',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Verify initially defaulted to customer_home
+    expect(findElement(tree, (el) => el.props?.testID === 'trainee-home-address-notice')).not.toBeNull();
+
+    // User switches to Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+
+    // Trigger multiple re-renders to ensure no asynchronous or subsequent render reverts the venue
+    tree = render();
+    await flushPromises();
+    tree = render();
+
+    // Sports Ground must remain selected
+    expect(findElement(tree, (el) => el.props?.testID === 'sports-ground-notice')).not.toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'trainee-home-address-notice')).toBeNull();
+
+    // Verify Kickboxing and Coach Maya remain selected
+    const mayaChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    expect(mayaChip.props.accessibilityState?.selected).toBe(true);
+
+    cleanup();
+  });
+
+  it('2. Sports Ground is retained in the final booking payload', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (createBooking as any).mockResolvedValue({ _id: 'bk_123', status: 'pending' });
+
+    const onSuccess = vi.fn();
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+        initialSport: 'kickboxing',
+        onSuccess,
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Switch to Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // Fill in custom ground name and specific ground address
+    const groundNameInput = findElement(tree, (el) => el.props?.testID === 'input-ground-name');
+    groundNameInput.props.onChangeText('City Sports Arena');
+
+    const addressInput = findElement(tree, (el) => el.props?.testID === 'input-booking-address');
+    addressInput.props.onChangeText('45 Stadium Road, Indiranagar');
+
+    // Fill customer phone
+    const phoneInput = findElement(tree, (el) => el.props?.testID === 'input-booking-phone');
+    phoneInput.props.onChangeText('+919876543210');
+
+    tree = render();
+
+    // Submit booking request
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Submit Booking Request');
+    await submitBtn.props.onPress();
+    await flushPromises();
+
+    // Verify createBooking was called with venueType: 'ground'
+    expect(createBooking).toHaveBeenCalledTimes(1);
+    const payload = (createBooking as any).mock.calls[0][1];
+    expect(payload.venueType).toBe('ground');
+    expect(payload.coachId).toBe('coach_001');
+    expect(payload.sport).toBe('kickboxing');
+    expect(payload.customerPhone).toBe('+919876543210');
+    expect(payload.trainingAddress).toContain('City Sports Arena');
+    expect(payload.coordinates).toBeUndefined();
+
+    cleanup();
+  });
+
+  it('3. Changing start and end times does not reset the selected coach or discipline', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select Boxing discipline
+    const boxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
+    boxingPill.props.onPress();
+    tree = render();
+
+    // Select coach_001
+    const mayaChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    mayaChip.props.onPress();
+    tree = render();
+
+    expect(findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001').props.accessibilityState?.selected).toBe(true);
+
+    // Change start time and end time
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    startInput.props.onChangeText('14:00');
+
+    const endInput = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+    endInput.props.onChangeText('16:00');
+
+    // Trigger re-render
+    tree = render();
+    await flushPromises();
+    tree = render();
+
+    // Verify start and end times are updated and retained
+    const updatedStart = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    const updatedEnd = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+    expect(updatedStart.props.value).toBe('14:00');
+    expect(updatedEnd.props.value).toBe('16:00');
+
+    // Verify selected coach remains coach_001 and selected sport remains boxing
+    const stillMayaChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    expect(stillMayaChip).not.toBeNull();
+    expect(stillMayaChip.props.accessibilityState?.selected).toBe(true);
+
+    const stillBoxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
+    expect(stillBoxingPill.props.style).toEqual(expect.arrayContaining([expect.objectContaining({ backgroundColor: '#F97316' })]));
+
+    cleanup();
+  });
+
+  it('4. Ground name remains intact after other fields change', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+        initialSport: 'boxing',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Switch to Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // Enter custom ground name
+    const groundNameInput = findElement(tree, (el) => el.props?.testID === 'input-ground-name');
+    groundNameInput.props.onChangeText('Indiranagar Football Arena');
+    tree = render();
+
+    expect(findElement(tree, (el) => el.props?.testID === 'input-ground-name').props.value).toBe('Indiranagar Football Arena');
+
+    // Now change start time
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    startInput.props.onChangeText('11:00');
+    tree = render();
+
+    // Change date
+    const dateInput = findElement(tree, (el) => el.props?.testID === 'input-booking-date');
+    dateInput.props.onChangeText('2026-11-28');
+    tree = render();
+
+    // Ground name must still be preserved
+    const preservedGroundName = findElement(tree, (el) => el.props?.testID === 'input-ground-name');
+    expect(preservedGroundName.props.value).toBe('Indiranagar Football Arena');
+
+    // Venue must still be Sports Ground
+    expect(findElement(tree, (el) => el.props?.testID === 'sports-ground-notice')).not.toBeNull();
+
+    cleanup();
+  });
+
+  it('5. Weekly and Monthly package selection survives venue and time changes', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: [getKolkataTomorrowDateString()],
+        sessionCount: 1,
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 1,
+        perSessionFee: 1500,
+        baseSessionFee: 1500,
+        platformCommission: 300,
+        coachAllocation: 1200,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 1500,
+        amountInPaise: 150000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+        initialSport: 'boxing',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select Weekly package
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify weekly package breakdown is shown
+    expect(findElement(tree, (el) => el.props?.testID === 'package-pricing-breakdown')).not.toBeNull();
+
+    // Switch venue to Sports Ground
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // Package must STILL be weekly and pricing breakdown must survive
+    expect(findElement(tree, (el) => el.props?.testID === 'package-pricing-breakdown')).not.toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'sports-ground-notice')).not.toBeNull();
+
+    // Switch to Monthly package
+    const tomorrowStr = getKolkataTomorrowDateString();
+    const startDateObj = new Date(`${tomorrowStr}T00:00:00.000Z`);
+    const endDateObj = new Date(startDateObj.getTime() + 29 * 24 * 60 * 60 * 1000);
+    const monthlyEndDate = endDateObj.toISOString().slice(0, 10);
+    const monthlySessionDates = [
+      tomorrowStr,
+      new Date(startDateObj.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      new Date(startDateObj.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      new Date(startDateObj.getTime() + 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    ];
+
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'monthly',
+        startDate: tomorrowStr,
+        endDate: monthlyEndDate,
+        totalDaysInWindow: 30,
+        sessionDates: monthlySessionDates,
+        sessionCount: 4,
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 4,
+        perSessionFee: 1500,
+        baseSessionFee: 6000,
+        platformCommission: 1200,
+        coachAllocation: 4800,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 6000,
+        amountInPaise: 600000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const monthlyPill = findElement(tree, (el) => el.props?.testID === 'package-option-monthly');
+    await monthlyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify Monthly breakdown
+    const totalPayable = findElement(tree, (el) => el.props?.testID === 'package-total-payable');
+    expect(extractText(totalPayable)).toContain('6000.00');
+
+    // Change start time while monthly is active
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    startInput.props.onChangeText('10:00');
+    tree = render();
+
+    // Monthly option must STILL be active
+    const activeMonthlyCard = findElement(tree, (el) => el.props?.testID === 'package-option-monthly');
+    expect(activeMonthlyCard.props.style).toEqual(expect.arrayContaining([expect.objectContaining({ borderColor: '#101C2C' })]));
+
+    cleanup();
+  });
+
+  it('6. Initial coach preselection happens correctly without repeatedly overriding user selections', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+        initialSport: 'boxing',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Coach_001 is preselected
+    expect(findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001').props.accessibilityState?.selected).toBe(true);
+
+    // User explicitly selects Coach_002 (Kenji, which also provides wushu)
+    const wushuPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-wushu');
+    wushuPill.props.onPress();
+    tree = render();
+
+    const kenjiChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_002');
+    kenjiChip.props.onPress();
+    tree = render();
+
+    expect(findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_002').props.accessibilityState?.selected).toBe(true);
+
+    // Switch venue
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // Re-renders must NOT reset coach back to coach_001
+    await flushPromises();
+    tree = render();
+
+    expect(findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_002').props.accessibilityState?.selected).toBe(true);
+    expect(findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001')).toBeNull(); // Maya does not offer Wushu
+
+    cleanup();
+  });
+
+  it('7. Closing and reopening the modal performs the intended fresh initialization', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+        initialSport: 'kickboxing',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Switch to Sports Ground and enter ground name
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    const groundNameInput = findElement(tree, (el) => el.props?.testID === 'input-ground-name');
+    groundNameInput.props.onChangeText('City Sports Stadium');
+    tree = render();
+
+    expect(findElement(tree, (el) => el.props?.testID === 'input-ground-name').props.value).toBe('City Sports Stadium');
+
+    // Close the modal: visible = false
+    tree = render({ visible: false });
+
+    // Reopen the modal: visible = true (with a different initial coach)
+    tree = render({ visible: true, initialCoachId: 'coach_002', initialSport: 'wushu' });
+    await flushPromises();
+    tree = render();
+
+    // Modal has freshly initialized
+    expect(findElement(tree, (el) => el.props?.testID === 'trainee-home-address-notice')).not.toBeNull();
+    expect(findElement(tree, (el) => el.props?.testID === 'sports-ground-notice')).toBeNull();
+
+    // Wushu and Kenji are preselected for the fresh session
+    const kenjiChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_002');
+    expect(kenjiChip).not.toBeNull();
+    expect(kenjiChip.props.accessibilityState?.selected).toBe(true);
+
+    cleanup();
+  });
+
+  it('8. Background coach fetching does not reset the booking form', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select Boxing and Coach Maya
+    const boxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
+    boxingPill.props.onPress();
+    tree = render();
+
+    const mayaChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+    mayaChip.props.onPress();
+    tree = render();
+
+    // Set custom times
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    startInput.props.onChangeText('07:30');
+    const endInput = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+    endInput.props.onChangeText('08:30');
+    tree = render();
+
+    // Enable fake timers to test debounced background coach fetching
+    vi.useFakeTimers();
+    try {
+      // Change date to trigger a debounced background fetch
+      const dateInput = findElement(tree, (el) => el.props?.testID === 'input-booking-date');
+      dateInput.props.onChangeText('2026-11-29');
+      tree = render();
+
+      // Configure background fetch response
+      (getPublicCoaches as any).mockResolvedValue([
+        ...mockCoachesList,
+        {
+          _id: 'coach_003',
+          name: 'Coach Alex',
+          role: 'coach',
+          profile: {
+            bio: 'Boxing trainer',
+            disciplines: ['boxing'],
+            venueTypes: ['customer_home'],
+            hourlyRate: 1800,
+          },
+        },
+      ]);
+
+      // 1. Advance the 300 ms debounce timer
+      // 2. Wait for the actual coach-fetch request
+      await vi.advanceTimersByTimeAsync(300);
+      tree = render();
+
+      // 3. Assert that updated date and times were passed to the API
+      expect(getPublicCoaches).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          discipline: 'boxing',
+          date: '2026-11-29',
+          startTime: '07:30',
+          endTime: '08:30',
+        })
+      );
+
+      // 4. Confirm coach selection and other form values remain intact
+      const stillMayaChip = findElement(tree, (el) => el.props?.testID === 'coach-chip-coach_001');
+      expect(stillMayaChip).not.toBeNull();
+      expect(stillMayaChip.props.accessibilityState?.selected).toBe(true);
+
+      const stillBoxingPill = findElement(tree, (el) => el.props?.testID === 'sport-pill-boxing');
+      expect(stillBoxingPill.props.style).toEqual(expect.arrayContaining([expect.objectContaining({ backgroundColor: '#F97316' })]));
+
+      const updatedDate = findElement(tree, (el) => el.props?.testID === 'input-booking-date');
+      expect(updatedDate.props.value).toBe('2026-11-29');
+
+      const updatedStart = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+      expect(updatedStart.props.value).toBe('07:30');
+
+      const updatedEnd = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+      expect(updatedEnd.props.value).toBe('08:30');
+
+      cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
