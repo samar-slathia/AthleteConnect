@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 15.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+  "developmentClient": false,
+  "distribution": "internal",
+  "env": {
+    "EXPO_PUBLIC_API_BASE_URL": "https://barstool-harpist-chewer.ngrok-free.dev"
+  },
+  "android": {
+    "buildType": "apk"
+  }
+},
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

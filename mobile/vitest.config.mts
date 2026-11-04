@@ -27,6 +27,7 @@ export default defineConfig({
       'expo-image-picker': path.resolve(__dirname, './src/__mocks__/expo-image-picker.ts'),
       'expo-file-system/legacy': path.resolve(__dirname, './src/__mocks__/expo-file-system.ts'),
       'expo-file-system': path.resolve(__dirname, './src/__mocks__/expo-file-system.ts'),
+      'react-native-razorpay': path.resolve(__dirname, './src/__mocks__/react-native-razorpay.ts'),
     },
   },
 });

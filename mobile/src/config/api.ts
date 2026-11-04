@@ -74,5 +74,6 @@ export const API_ENDPOINTS = {
   COACHES: '/api/coaches',
   USER_PHOTO: '/api/users/me/photo',
   COACH_PHOTO: (id: string) => `/api/coaches/${id}/photo`,
+  PAYMENTS: '/api/payments',
 } as const;
 

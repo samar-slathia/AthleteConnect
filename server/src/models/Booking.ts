@@ -31,8 +31,17 @@ export const BOOKING_STATUSES = [
 ] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
-export const PAYMENT_STATUSES = ['unpaid', 'paid'] as const;
+export const PAYMENT_STATUSES = ['unpaid', 'paid', 'partially_refunded', 'refunded'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const REFUND_STATUSES = [
+  'none',
+  'pending',
+  'partially_refunded',
+  'processed',
+  'failed',
+] as const;
+export type RefundStatus = (typeof REFUND_STATUSES)[number];
 
 export const MIN_BOOKING_DURATION_MINUTES = 30;
 export const MAX_BOOKING_DURATION_MINUTES = 240; // 4 hours maximum session duration
@@ -64,6 +73,9 @@ export interface IBooking {
   customerPhone: string;
   status: BookingStatus;
   paymentStatus: PaymentStatus;
+  refundStatus?: RefundStatus;
+  paymentDueAt?: Date;
+  paymentTransactionId?: mongoose.Types.ObjectId;
   hourlyRateSnapshot?: number;
   rejectionReason?: string;
   cancellationReason?: string;
@@ -310,6 +322,22 @@ const BookingSchema = new Schema<IBookingDocument>(
       default: 'unpaid',
       index: true,
     },
+    refundStatus: {
+      type: String,
+      enum: {
+        values: REFUND_STATUSES,
+        message: 'Invalid refund status "{VALUE}".',
+      },
+      default: 'none',
+      index: true,
+    },
+    paymentDueAt: {
+      type: Date,
+    },
+    paymentTransactionId: {
+      type: Schema.Types.ObjectId,
+      ref: 'PaymentTransaction',
+    },
     hourlyRateSnapshot: {
       type: Number,
       min: 0,
@@ -429,6 +457,8 @@ export function serializeBookingForUser(
     venueType: b.venueType,
     status: b.status,
     paymentStatus: b.paymentStatus,
+    refundStatus: b.refundStatus || 'none',
+    paymentDueAt: b.paymentDueAt,
     hourlyRateSnapshot: b.hourlyRateSnapshot,
     rejectionReason: b.rejectionReason,
     cancellationReason: b.cancellationReason,

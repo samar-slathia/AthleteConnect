@@ -15,7 +15,8 @@ export type BookingStatus =
   | 'cancelled'
   | 'completed';
 
-export type PaymentStatus = 'unpaid' | 'paid';
+export type PaymentStatus = 'unpaid' | 'paid' | 'partially_refunded' | 'refunded';
+export type RefundStatus = 'none' | 'pending' | 'partially_refunded' | 'processed' | 'failed';
 
 export interface CoachDiscoveryProfile {
   bio: string;
@@ -101,6 +102,9 @@ export interface BookingItem {
   customerPhone?: string;
   status: BookingStatus;
   paymentStatus: PaymentStatus;
+  refundStatus?: RefundStatus;
+  paymentDueAt?: string;
+  paymentTransactionId?: string;
   hourlyRateSnapshot?: number;
   rejectionReason?: string;
   cancellationReason?: string;

@@ -1,13 +1,24 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "AthleteConnect",
+    "slug": "athleteconnect",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.athleteconnect.mobile",
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "tez",
+          "phonepe",
+          "paytmmp",
+          "bhim",
+          "credpay",
+          "gpay"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,6 +27,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "package": "com.athleteconnect.mobile",
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -24,7 +36,14 @@
     "plugins": [
       "expo-font",
       "expo-status-bar",
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-dev-client"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7c594cc3-d7a8-45a0-998d-5d2ae70eb515"
+      }
+    },
+    "owner": "samarslathia"
   }
 }

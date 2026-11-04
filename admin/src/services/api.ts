@@ -225,7 +225,8 @@ export interface AdminBookingItem {
   durationMinutes: number;
   venueType: string;
   status: 'pending' | 'accepted' | 'completed' | 'cancelled' | 'rejected';
-  paymentStatus: 'unpaid' | 'paid';
+  paymentStatus: 'unpaid' | 'paid' | 'partially_refunded' | 'refunded';
+  refundStatus?: 'none' | 'pending' | 'partially_refunded' | 'processed' | 'failed';
   hourlyRateSnapshot?: number;
   rejectionReason?: string;
   cancellationReason?: string;

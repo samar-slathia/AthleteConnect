@@ -12,6 +12,7 @@ import { CustomerBookingCard } from './components/CustomerBookingCard';
 import { BookingRequestModal } from './components/BookingRequestModal';
 import { BookingChatModal } from './components/BookingChatModal';
 import { RatingModal } from './components/RatingModal';
+import { CheckoutModal } from './components/CheckoutModal';
 import { Button } from '../../components/Button';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 
@@ -41,6 +42,7 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [activeChatBooking, setActiveChatBooking] = useState<BookingItem | null>(null);
   const [selectedBookingForRating, setSelectedBookingForRating] = useState<BookingItem | null>(null);
+  const [selectedBookingForPayment, setSelectedBookingForPayment] = useState<BookingItem | null>(null);
 
   const loadBookings = useCallback(async () => {
     if (!effectiveToken) return;
@@ -270,6 +272,7 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
                   isCancelling={cancellingBookingId === booking._id}
                   onOpenChat={(b) => setActiveChatBooking(b)}
                   onRate={(b) => setSelectedBookingForRating(b)}
+                  onPay={(b) => setSelectedBookingForPayment(b)}
                 />
               ))}
             </View>
@@ -333,6 +336,20 @@ export const IndividualHomeView: React.FC<IndividualHomeViewProps> = ({
           setBookings((prev) =>
             prev.map((b) => (b._id === bookingId ? { ...b, isRated: true, review } : b))
           );
+        }}
+      />
+
+      {/* Razorpay Test Mode Checkout Modal */}
+      <CheckoutModal
+        visible={Boolean(selectedBookingForPayment)}
+        onClose={() => setSelectedBookingForPayment(null)}
+        booking={selectedBookingForPayment}
+        token={effectiveToken}
+        onSuccess={(bookingId, updatedBooking) => {
+          setBookings((prev) =>
+            prev.map((b) => (b._id === bookingId ? { ...b, paymentStatus: 'paid' } : b))
+          );
+          loadBookings();
         }}
       />
     </View>

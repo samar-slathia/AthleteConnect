@@ -10,6 +10,7 @@ import { bookingRouter } from './routes/booking';
 import { coachDiscoveryRouter } from './routes/coachDiscovery';
 import { userRouter } from './routes/user';
 import { adminRouter } from './routes/admin';
+import { paymentRouter } from './routes/payment';
 import { notFoundHandler } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -65,7 +66,13 @@ export function createApp(): Application {
   };
 
   app.use(cors(corsOptions));
-  app.use(express.json());
+  app.use(
+    express.json({
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true }));
 
   // API Routes
@@ -77,6 +84,7 @@ export function createApp(): Application {
   app.use('/api/coaches', coachDiscoveryRouter);
   app.use('/api/users', userRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/payments', paymentRouter);
 
   // Catch-all 404 handler for undefined endpoints
   app.use(notFoundHandler);

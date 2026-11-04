@@ -98,6 +98,21 @@ export const AppState = {
   },
 };
 
+export const NativeModules = {
+  RNRazorpayCheckout: {
+    open: () => {},
+  },
+  RazorpayEventEmitter: {},
+};
+
+export class NativeEventEmitter {
+  addListener() {
+    return { remove: () => {} };
+  }
+  removeAllListeners() {}
+  removeSubscription() {}
+}
+
 export default {
   Platform,
   StyleSheet,
@@ -115,4 +130,6 @@ export default {
   PanResponder,
   AccessibilityInfo,
   AppState,
+  NativeModules,
+  NativeEventEmitter,
 };

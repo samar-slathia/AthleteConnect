@@ -346,6 +346,24 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/booking is already completed/i);
     });
+
+    it('rejects starting an unpaid accepted booking with HTTP 400', async () => {
+      const unpaidBooking = {
+        _id: bookingId,
+        customerId,
+        coachId,
+        status: 'accepted',
+        paymentStatus: 'unpaid',
+        durationMinutes: 60,
+      };
+      mockBookingFindById(unpaidBooking);
+      const res = await request(app)
+        .patch(`/api/bookings/${bookingId}/start`)
+        .set('Authorization', `Bearer ${coachToken}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Customer payment has not been confirmed/i);
+    });
   });
 
   describe('PHASE D: Atomic Session Start & Idempotency', () => {
@@ -355,6 +373,7 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
         customerId,
         coachId,
         status: 'accepted',
+        paymentStatus: 'paid',
         durationMinutes: 60,
       };
       const mockStarted: any = {
@@ -428,6 +447,7 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
         customerId,
         coachId,
         status: 'accepted',
+        paymentStatus: 'paid',
         durationMinutes: 60,
       };
       const winningStart = new Date(Date.now() - 1000);
@@ -437,6 +457,7 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
         customerId,
         coachId,
         status: 'in_progress',
+        paymentStatus: 'paid',
         durationMinutes: 60,
         sessionStartedAt: winningStart,
         expectedEndedAt: winningEnd,
@@ -559,6 +580,7 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
         customerId,
         coachId,
         status: 'accepted',
+        paymentStatus: 'paid',
         durationMinutes: invalidDuration,
       };
       mockBookingFindById(corruptedBooking);
@@ -579,6 +601,7 @@ describe('Phase 8.2: Atomic Session Lifecycle & Strict Completion Enforcement', 
         customerId,
         coachId,
         status: 'accepted',
+        paymentStatus: 'paid',
         durationMinutes: 90, // persisted is 90 mins
       };
       const mockStarted: any = {

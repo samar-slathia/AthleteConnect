@@ -11,6 +11,8 @@ import {
   Star,
   Timer,
   CheckCircle2,
+  CheckCircle,
+  CreditCard,
 } from 'lucide-react-native';
 import { BookingItem } from '../../../services/bookingApi';
 import { openInGoogleMaps } from '../../../services/locationService';
@@ -23,6 +25,7 @@ export interface CustomerBookingCardProps {
   isCancelling?: boolean;
   onOpenChat?: (booking: BookingItem) => void;
   onRate?: (booking: BookingItem) => void;
+  onPay?: (booking: BookingItem) => void;
 }
 
 const VENUE_LABELS: Record<string, string> = {
@@ -115,8 +118,11 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
   isCancelling = false,
   onOpenChat,
   onRate,
+  onPay,
 }) => {
   const isInProgress = booking.status === 'in_progress';
+  const isPaid = booking.paymentStatus === 'paid';
+  const canPay = booking.status === 'accepted' && booking.paymentStatus === 'unpaid' && Boolean(onPay);
 
   const getBadgeVariant = (status: string): 'orange' | 'navy' | 'demo' | 'success' => {
     switch (status) {
@@ -168,7 +174,8 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
     (canCancel && Boolean(onCancel)) ||
     (canChat && Boolean(onOpenChat)) ||
     hasValidDestination ||
-    canRate;
+    canRate ||
+    canPay;
 
   const handleOpenMaps = () => {
     const isGround = booking.venueType === 'ground';
@@ -186,10 +193,28 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
         <View style={styles.sportBadgeWrap}>
           <Text style={styles.sportText}>{booking.sport?.toUpperCase() || 'SESSION'}</Text>
         </View>
-        <Badge
-          label={getStatusLabel(booking.status)}
-          variant={getBadgeVariant(booking.status)}
-        />
+        <View style={styles.headerBadgesRow}>
+          {isPaid ? (
+            <View style={styles.paidBadge} testID={`paid-badge-${booking._id}`}>
+              <CheckCircle size={11} color={COLORS.success} />
+              <Text style={styles.paidBadgeText}>PAID</Text>
+            </View>
+          ) : booking.paymentStatus === 'partially_refunded' ? (
+            <View style={styles.paidBadge} testID={`partially-refunded-badge-${booking._id}`}>
+              <CheckCircle size={11} color="#D97706" />
+              <Text style={[styles.paidBadgeText, { color: '#D97706' }]}>PARTIAL REFUND</Text>
+            </View>
+          ) : booking.paymentStatus === 'refunded' ? (
+            <View style={styles.paidBadge} testID={`refunded-badge-${booking._id}`}>
+              <CheckCircle size={11} color="#DC2626" />
+              <Text style={[styles.paidBadgeText, { color: '#DC2626' }]}>REFUNDED</Text>
+            </View>
+          ) : null}
+          <Badge
+            label={getStatusLabel(booking.status)}
+            variant={getBadgeVariant(booking.status)}
+          />
+        </View>
       </View>
 
       {/* Coach Info */}
@@ -222,6 +247,39 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
         <Text style={styles.addressText} numberOfLines={2}>
           📍 {booking.trainingAddress}
         </Text>
+      ) : null}
+
+      {/* Unpaid Payment Banner for Accepted Bookings */}
+      {booking.status === 'accepted' && booking.paymentStatus === 'unpaid' ? (
+        <View style={styles.paymentNoticeBox} testID={`unpaid-banner-${booking._id}`}>
+          <View style={styles.paymentNoticeLeft}>
+            <CreditCard size={14} color="#B45309" />
+            <Text style={styles.paymentNoticeText}>Prepaid payment required to confirm session</Text>
+          </View>
+          {onPay ? (
+            <TouchableOpacity
+              style={styles.payNowSmallBtn}
+              onPress={() => onPay(booking)}
+              accessibilityRole="button"
+              accessibilityLabel="Prepaid Pay Now"
+              testID={`button-pay-notice-${booking._id}`}
+            >
+              <Text style={styles.payNowSmallBtnText}>Prepaid — Pay Now</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* Refund status notice */}
+      {booking.refundStatus === 'pending' ? (
+        <View style={styles.noteBox} testID={`refund-pending-notice-${booking._id}`}>
+          <Text style={styles.noteLabel}>Refund Notice: Refund initiated — awaiting bank processing</Text>
+        </View>
+      ) : null}
+      {booking.refundStatus === 'failed' ? (
+        <View style={styles.noteBox} testID={`refund-failed-notice-${booking._id}`}>
+          <Text style={styles.noteLabel}>Refund Notice: Refund attempt was unsuccessful</Text>
+        </View>
       ) : null}
 
       {/* LIVE IN-PROGRESS BANNER (Customer view) */}
@@ -274,6 +332,19 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
       {/* Action Row */}
       {showActionRow ? (
         <View style={styles.actionRow}>
+          {canPay ? (
+            <TouchableOpacity
+              style={styles.payButton}
+              onPress={() => onPay && onPay(booking)}
+              accessibilityRole="button"
+              accessibilityLabel={`Prepaid pay for session with ${booking.coachName || 'coach'}`}
+              testID={`button-pay-${booking._id}`}
+            >
+              <CreditCard size={13} color={COLORS.navy} />
+              <Text style={styles.payButtonText}>Prepaid — Pay Now</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {canRate ? (
             <TouchableOpacity
               style={styles.rateButton}
@@ -522,6 +593,81 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.navy,
+  },
+  payButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: COLORS.orange,
+    borderRadius: RADII.sm,
+  },
+  payButtonText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.navy,
+  },
+  headerBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paidBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(22, 128, 93, 0.12)',
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: RADII.full,
+    borderWidth: 1,
+    borderColor: 'rgba(22, 128, 93, 0.25)',
+  },
+  paidBadgeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.success,
+    letterSpacing: 0.5,
+  },
+  paymentNoticeBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 7,
+    borderRadius: RADII.sm,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginTop: 6,
+  },
+  paymentNoticeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  paymentNoticeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#92400E',
+    flex: 1,
+  },
+  payNowSmallBtn: {
+    backgroundColor: COLORS.navy,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: RADII.sm,
+  },
+  payNowSmallBtnText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.white,
   },
   ratedBadge: {
     flexDirection: 'row',

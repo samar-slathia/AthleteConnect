@@ -20,6 +20,7 @@ import { CoachProfile } from '../models/CoachProfile';
 import { CoachAvailability, getCivilDayOfWeek, isIntervalInsideSlots } from '../models/CoachAvailability';
 import { Review } from '../models/Review';
 import { executeScheduleMutationWithRetry, ScheduleConflictError } from '../utils/scheduleLock';
+import { config } from '../config/env';
 
 const ALLOWED_CREATE_FIELDS = new Set([
   'coachId',
@@ -548,6 +549,9 @@ export async function acceptBooking(
       }
 
       // 6. Conditionally transition booking from pending to accepted (verifying matchedCount === 1)
+      const paymentExpiryMinutes = config.PAYMENT_EXPIRY_MINUTES || 120;
+      const paymentDueAt = new Date(Date.now() + paymentExpiryMinutes * 60 * 1000);
+
       let matchedCount = 1;
       if (mongoose.connection.readyState === 1 && !(freshBooking as any).save?.mock) {
         const updateOpts: any = {};
@@ -560,13 +564,17 @@ export async function acceptBooking(
             status: 'pending',
           },
           {
-            $set: { status: 'accepted' },
+            $set: {
+              status: 'accepted',
+              paymentDueAt,
+            },
           },
           updateOpts
         );
         matchedCount = updateRes.matchedCount;
       } else {
         freshBooking.status = 'accepted';
+        freshBooking.paymentDueAt = paymentDueAt;
         if (typeof freshBooking.save === 'function') {
           await freshBooking.save();
         }
@@ -795,6 +803,13 @@ export async function startBookingSession(
       });
     }
 
+    // Strict safety: Only confirmed paid or partially refunded bookings can be started (fully refunded or unpaid rejected)
+    if (booking.paymentStatus !== 'paid' && booking.paymentStatus !== 'partially_refunded') {
+      return res.status(400).json({
+        error: 'Cannot start session. Customer payment has not been confirmed for this booking.',
+      });
+    }
+
     // Validate persisted duration explicitly: must be valid integer within 30-240 minutes
     const rawDuration = booking.durationMinutes;
     const durationMinutes = Number(rawDuration);
@@ -815,12 +830,13 @@ export async function startBookingSession(
     const durationMs = durationMinutes * 60 * 1000;
     const expectedEnd = new Date(now.getTime() + durationMs);
 
-    // Atomic conditional update: strictly match status 'accepted'
+    // Atomic conditional update: strictly match status 'accepted' and paid or partially refunded
     const updatedBooking = await Booking.findOneAndUpdate(
       {
         _id: booking._id,
         coachId: booking.coachId?._id || booking.coachId,
         status: 'accepted',
+        paymentStatus: { $in: ['paid', 'partially_refunded'] },
       },
       {
         $set: {
@@ -853,6 +869,16 @@ export async function startBookingSession(
 
       if (current && current.status === 'completed') {
         return res.status(400).json({ error: 'Cannot start session: booking is already completed.' });
+      }
+
+      if (
+        current &&
+        current.paymentStatus !== 'paid' &&
+        current.paymentStatus !== 'partially_refunded'
+      ) {
+        return res.status(400).json({
+          error: 'Cannot start session. Customer payment has not been confirmed for this booking.',
+        });
       }
 
       return res.status(400).json({

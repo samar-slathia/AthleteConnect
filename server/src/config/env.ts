@@ -1,8 +1,13 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load environment variables from .env file in the server directory
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Load environment variables from .env file during non-test execution.
+// In test environments (NODE_ENV === 'test' or process.env.VITEST), do not automatically load server/.env
+// to guarantee test isolation, preserve placeholder defaults, and prevent real outbound gateway calls.
+const isTestRuntime = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+if (!isTestRuntime) {
+  dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+}
 
 export type NodeEnv = 'development' | 'production' | 'test';
 
@@ -14,6 +19,13 @@ export interface EnvConfig {
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
   TRUST_PROXY: boolean | number | string;
+  RAZORPAY_KEY_ID: string;
+  RAZORPAY_KEY_SECRET: string;
+  RAZORPAY_WEBHOOK_SECRET: string;
+  PLATFORM_COMMISSION_PERCENTAGE: number;
+  COACH_ALLOCATION_PERCENTAGE: number;
+  TAX_RATE_PERCENTAGE: number;
+  PAYMENT_EXPIRY_MINUTES: number;
   isProduction: boolean;
   isTest: boolean;
   isDevelopment: boolean;
@@ -127,6 +139,73 @@ export function validateAndLoadConfig(env: NodeJS.ProcessEnv = process.env): Env
     }
   }
 
+  // Razorpay Test Mode Configuration & Security Validation
+  let RAZORPAY_KEY_ID = env.RAZORPAY_KEY_ID?.trim() || '';
+  let RAZORPAY_KEY_SECRET = env.RAZORPAY_KEY_SECRET?.trim() || '';
+  let RAZORPAY_WEBHOOK_SECRET = env.RAZORPAY_WEBHOOK_SECRET?.trim() || '';
+
+  // Strict prevention of live Razorpay credentials in non-production
+  if (RAZORPAY_KEY_ID.startsWith('rzp_live_')) {
+    throw new Error(
+      'CRITICAL SECURITY ERROR: Live Razorpay credentials (rzp_live_*) detected! Live credentials are strictly forbidden in this environment.'
+    );
+  }
+
+  // In test mode, guarantee safe placeholder credentials to enforce test isolation
+  // and prevent accidental real outbound gateway requests using merchant credentials.
+  // All three Razorpay credentials are unconditionally replaced with fixed safe placeholders.
+  if (isTest) {
+    RAZORPAY_KEY_ID = 'rzp_test_placeholder_key_id';
+    RAZORPAY_KEY_SECRET = 'placeholder_razorpay_key_secret_test';
+    RAZORPAY_WEBHOOK_SECRET = 'placeholder_razorpay_webhook_secret_test';
+  } else {
+    if (!RAZORPAY_KEY_ID) {
+      if (isProduction) {
+        throw new Error('Missing required environment variable: RAZORPAY_KEY_ID.');
+      }
+      RAZORPAY_KEY_ID = 'rzp_test_placeholder_key_id';
+    }
+
+    if (!RAZORPAY_KEY_SECRET) {
+      if (isProduction) {
+        throw new Error('Missing required environment variable: RAZORPAY_KEY_SECRET.');
+      }
+      RAZORPAY_KEY_SECRET = 'placeholder_razorpay_key_secret_test';
+    }
+
+    if (!RAZORPAY_WEBHOOK_SECRET) {
+      if (isProduction) {
+        throw new Error('Missing required environment variable: RAZORPAY_WEBHOOK_SECRET.');
+      }
+      RAZORPAY_WEBHOOK_SECRET = 'placeholder_razorpay_webhook_secret_test';
+    }
+  }
+
+  // Marketplace Financial Configuration
+  const rawComm = env.PLATFORM_COMMISSION_PERCENTAGE ?? '20';
+  const PLATFORM_COMMISSION_PERCENTAGE = Number(rawComm);
+  if (isNaN(PLATFORM_COMMISSION_PERCENTAGE) || PLATFORM_COMMISSION_PERCENTAGE < 0 || PLATFORM_COMMISSION_PERCENTAGE > 100) {
+    throw new Error(`Invalid PLATFORM_COMMISSION_PERCENTAGE "${rawComm}". Must be a number between 0 and 100.`);
+  }
+
+  const rawAlloc = env.COACH_ALLOCATION_PERCENTAGE ?? '80';
+  const COACH_ALLOCATION_PERCENTAGE = Number(rawAlloc);
+  if (isNaN(COACH_ALLOCATION_PERCENTAGE) || COACH_ALLOCATION_PERCENTAGE < 0 || COACH_ALLOCATION_PERCENTAGE > 100) {
+    throw new Error(`Invalid COACH_ALLOCATION_PERCENTAGE "${rawAlloc}". Must be a number between 0 and 100.`);
+  }
+
+  const rawTax = env.TAX_RATE_PERCENTAGE ?? '0';
+  const TAX_RATE_PERCENTAGE = Number(rawTax);
+  if (isNaN(TAX_RATE_PERCENTAGE) || TAX_RATE_PERCENTAGE < 0 || TAX_RATE_PERCENTAGE > 100) {
+    throw new Error(`Invalid TAX_RATE_PERCENTAGE "${rawTax}". Must be a number between 0 and 100.`);
+  }
+
+  const rawExpiry = env.PAYMENT_EXPIRY_MINUTES ?? '120';
+  const PAYMENT_EXPIRY_MINUTES = parseInt(String(rawExpiry), 10);
+  if (isNaN(PAYMENT_EXPIRY_MINUTES) || PAYMENT_EXPIRY_MINUTES < 5 || PAYMENT_EXPIRY_MINUTES > 1440) {
+    throw new Error(`Invalid PAYMENT_EXPIRY_MINUTES "${rawExpiry}". Must be an integer between 5 and 1440 minutes.`);
+  }
+
   return Object.freeze({
     NODE_ENV,
     PORT,
@@ -135,6 +214,13 @@ export function validateAndLoadConfig(env: NodeJS.ProcessEnv = process.env): Env
     JWT_SECRET,
     JWT_EXPIRES_IN,
     TRUST_PROXY,
+    RAZORPAY_KEY_ID,
+    RAZORPAY_KEY_SECRET,
+    RAZORPAY_WEBHOOK_SECRET,
+    PLATFORM_COMMISSION_PERCENTAGE,
+    COACH_ALLOCATION_PERCENTAGE,
+    TAX_RATE_PERCENTAGE,
+    PAYMENT_EXPIRY_MINUTES,
     isProduction,
     isTest,
     isDevelopment,
