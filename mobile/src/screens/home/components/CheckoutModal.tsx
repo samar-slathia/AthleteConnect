@@ -204,11 +204,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <View style={styles.sessionCard}>
               <Text style={styles.coachNameText}>{booking.coachName || 'Coaching Session'}</Text>
               <Text style={styles.sportText}>
-                {booking.sport?.toUpperCase()} • {durationHrs} hrs ({booking.durationMinutes} mins)
+                {booking.packageType && booking.packageType !== 'single'
+                  ? `${booking.packageType === 'weekly' ? '7-Day Coaching Package' : 'Monthly Coaching Package'} • ${booking.sport?.toUpperCase()}`
+                  : `${booking.sport?.toUpperCase()} • ${durationHrs} hrs (${booking.durationMinutes} mins)`}
               </Text>
-              <Text style={styles.dateText}>
-                📅 {booking.date} at {booking.startTime}–{booking.endTime}
-              </Text>
+              {booking.packageType && booking.packageType !== 'single' ? (
+                <Text style={styles.dateText}>
+                  📅 {booking.packageSessionCount || orderData?.sessionCount || 1} Sessions ({booking.packageStartDate || booking.date} to {booking.packageEndDate || booking.date}) at {booking.startTime}–{booking.endTime}
+                </Text>
+              ) : (
+                <Text style={styles.dateText}>
+                  📅 {booking.date} at {booking.startTime}–{booking.endTime}
+                </Text>
+              )}
             </View>
 
             {/* Test Mode Callout */}
@@ -260,7 +268,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {/* Coaching Fee */}
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>
-                    Coaching Session Fee ({durationHrs} hr @ ₹{rateSnapshot}/hr)
+                    {orderData.breakdown.sessionCount && orderData.breakdown.sessionCount > 1
+                      ? `Package Fee (${orderData.breakdown.sessionCount} sessions @ ₹${orderData.breakdown.perSessionFee || (orderData.breakdown.coachingFee / orderData.breakdown.sessionCount)}/session)`
+                      : `Coaching Session Fee (${durationHrs} hr @ ₹${rateSnapshot}/hr)`}
                   </Text>
                   <Text style={styles.breakdownValue} testID="breakdown-coaching-fee">
                     ₹{orderData.breakdown.coachingFee.toFixed(2)}

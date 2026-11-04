@@ -5,6 +5,8 @@ import { BookingItem } from './bookingApi';
 
 export interface PaymentBreakdown {
   coachingFee: number;
+  sessionCount?: number;
+  perSessionFee?: number;
   taxAmount: number;
   taxRatePercentage: number;
   taxLabel: string;
@@ -17,6 +19,8 @@ export interface PaymentOrderResponse {
   amountInPaise: number;
   currency: string;
   keyId: string;
+  packageType?: 'single' | 'weekly' | 'monthly';
+  sessionCount?: number;
   breakdown: PaymentBreakdown;
   paymentDueAt?: string;
   message?: string;
@@ -51,6 +55,8 @@ export interface BookingPaymentStatusResponse {
   paymentStatus: PaymentStatus;
   refundStatus?: RefundStatus;
   paymentDueAt?: string;
+  packageType?: 'single' | 'weekly' | 'monthly';
+  sessionCount?: number;
   transaction?: {
     orderId: string;
     paymentId?: string;
@@ -58,6 +64,7 @@ export interface BookingPaymentStatusResponse {
     refundStatus?: RefundStatus;
     refundedAmount?: number;
     coachingFee: number;
+    sessionCount?: number;
     taxAmount: number;
     taxRatePercentage: number;
     totalAmount: number;

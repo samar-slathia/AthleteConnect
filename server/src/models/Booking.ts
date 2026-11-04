@@ -31,6 +31,9 @@ export const BOOKING_STATUSES = [
 ] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
+export const PACKAGE_TYPES = ['single', 'weekly', 'monthly'] as const;
+export type PackageType = (typeof PACKAGE_TYPES)[number];
+
 export const PAYMENT_STATUSES = ['unpaid', 'paid', 'partially_refunded', 'refunded'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
@@ -74,6 +77,13 @@ export interface IBooking {
   status: BookingStatus;
   paymentStatus: PaymentStatus;
   refundStatus?: RefundStatus;
+  packageType?: PackageType;
+  packageGroupId?: mongoose.Types.ObjectId;
+  packageSessionIndex?: number;
+  packageSessionCount?: number;
+  packageStartDate?: string;
+  packageEndDate?: string;
+  packageTotalAmount?: number;
   paymentDueAt?: Date;
   paymentTransactionId?: mongoose.Types.ObjectId;
   hourlyRateSnapshot?: number;
@@ -342,6 +352,36 @@ const BookingSchema = new Schema<IBookingDocument>(
       type: Number,
       min: 0,
     },
+    packageType: {
+      type: String,
+      enum: PACKAGE_TYPES,
+      default: 'single',
+      index: true,
+    },
+    packageGroupId: {
+      type: Schema.Types.ObjectId,
+      index: true,
+    },
+    packageSessionIndex: {
+      type: Number,
+      min: 1,
+    },
+    packageSessionCount: {
+      type: Number,
+      min: 1,
+    },
+    packageStartDate: {
+      type: String,
+      trim: true,
+    },
+    packageEndDate: {
+      type: String,
+      trim: true,
+    },
+    packageTotalAmount: {
+      type: Number,
+      min: 0,
+    },
     rejectionReason: {
       type: String,
       trim: true,
@@ -399,6 +439,8 @@ const BookingSchema = new Schema<IBookingDocument>(
 BookingSchema.index({ coachId: 1, date: 1, status: 1 });
 // Compound index for customer booking queries
 BookingSchema.index({ customerId: 1, status: 1 });
+// Compound index for package group queries
+BookingSchema.index({ packageGroupId: 1, status: 1 });
 
 export const Booking: Model<IBookingDocument> =
   (mongoose.models.Booking as Model<IBookingDocument>) ||
@@ -458,6 +500,13 @@ export function serializeBookingForUser(
     status: b.status,
     paymentStatus: b.paymentStatus,
     refundStatus: b.refundStatus || 'none',
+    packageType: b.packageType || 'single',
+    packageGroupId: b.packageGroupId ? b.packageGroupId.toString() : undefined,
+    packageSessionIndex: b.packageSessionIndex,
+    packageSessionCount: b.packageSessionCount,
+    packageStartDate: b.packageStartDate,
+    packageEndDate: b.packageEndDate,
+    packageTotalAmount: b.packageTotalAmount,
     paymentDueAt: b.paymentDueAt,
     hourlyRateSnapshot: b.hourlyRateSnapshot,
     rejectionReason: b.rejectionReason,

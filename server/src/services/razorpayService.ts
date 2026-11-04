@@ -4,6 +4,8 @@ import { config } from '../config/env';
 export interface PaymentBreakdown {
   hourlyRate: number;
   durationMinutes: number;
+  sessionCount: number;
+  perSessionFee: number;
   baseSessionFee: number;
   platformCommission: number; // 20% internal ledger
   coachAllocation: number;    // 80% internal ledger
@@ -16,6 +18,7 @@ export interface PaymentBreakdown {
 
 /**
  * Calculates deterministic pricing breakdown adhering strictly to:
+ * - Session scaling: baseSessionFee = hourlyRate * (durationMinutes / 60) * sessionCount
  * - 20% platform commission (internal)
  * - 80% coach allocation (internal)
  * - Separate configurable tax line (demonstration estimate, never deducted from allocations)
@@ -25,11 +28,14 @@ export function calculatePaymentBreakdown(params: {
   hourlyRate: number;
   durationMinutes: number;
   taxRatePercentage?: number;
+  sessionCount?: number;
 }): PaymentBreakdown {
   const { hourlyRate, durationMinutes } = params;
+  const count = params.sessionCount && params.sessionCount > 0 ? Math.floor(params.sessionCount) : 1;
   const taxRate = params.taxRatePercentage ?? config.TAX_RATE_PERCENTAGE ?? 0;
 
-  const baseSessionFee = Number((hourlyRate * (durationMinutes / 60)).toFixed(2));
+  const perSessionFee = Number((hourlyRate * (durationMinutes / 60)).toFixed(2));
+  const baseSessionFee = Number((perSessionFee * count).toFixed(2));
   const commPercent = config.PLATFORM_COMMISSION_PERCENTAGE ?? 20;
   const platformCommission = Number((baseSessionFee * (commPercent / 100)).toFixed(2));
   // Exact complement to prevent 1-paise rounding discrepancy
@@ -47,6 +53,8 @@ export function calculatePaymentBreakdown(params: {
   return {
     hourlyRate,
     durationMinutes,
+    sessionCount: count,
+    perSessionFee,
     baseSessionFee,
     platformCommission,
     coachAllocation,

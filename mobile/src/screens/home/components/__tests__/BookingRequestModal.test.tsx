@@ -6,6 +6,7 @@ import {
   CoachDiscoveryItem,
   getPublicCoaches,
   createBooking,
+  getPackagePreview,
   getKolkataTomorrowDateString,
 } from '../../../../services/bookingApi';
 import { AuthContext, AuthContextType } from '../../../../context/AuthContext';
@@ -35,6 +36,7 @@ vi.mock('../../../../services/bookingApi', async (importOriginal) => {
     ...actual,
     getPublicCoaches: vi.fn(),
     createBooking: vi.fn(),
+    getPackagePreview: vi.fn(),
   };
 });
 
@@ -190,6 +192,24 @@ function findAllElements(element: any, predicate: (el: any) => boolean, results:
 function findElement(element: any, predicate: (el: any) => boolean): any {
   const results = findAllElements(element, predicate);
   return results.length > 0 ? results[0] : null;
+}
+
+function extractText(element: any): string {
+  if (element === null || element === undefined) return '';
+  if (typeof element === 'string' || typeof element === 'number') return String(element);
+  if (element.props && element.props.title) return String(element.props.title);
+  if (Array.isArray(element)) return element.map(extractText).join(' ');
+  if (typeof element.type === 'function') {
+    try {
+      return extractText(element.type(element.props));
+    } catch {
+      return '';
+    }
+  }
+  if (element.props && element.props.children) {
+    return extractText(element.props.children);
+  }
+  return '';
 }
 
 const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
@@ -763,6 +783,452 @@ describe('BookingRequestModal — Phase 3C Training Venue Rules', () => {
       trainingAddress: 'City Stadium Ground',
       customerPhone: '+919876543210',
     });
+
+    cleanup();
+  });
+
+  it('displays package options and fetches preview schedule & pricing when 7-Day Package is selected', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: '2026-11-20',
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: ['2026-11-20', '2026-11-23', '2026-11-25'],
+        sessionCount: 3,
+        skippedDates: [],
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 3,
+        perSessionFee: 1500,
+        baseSessionFee: 4500,
+        platformCommission: 900,
+        coachAllocation: 3600,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 4500,
+        amountInPaise: 450000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Verify package option pills are rendered
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    expect(weeklyPill).not.toBeNull();
+
+    // Select weekly package
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify getPackagePreview was called
+    expect(getPackagePreview).toHaveBeenCalled();
+
+    // Verify package preview content is rendered
+    const previewContent = findElement(tree, (el) => el.props?.testID === 'package-preview-content');
+    expect(previewContent).not.toBeNull();
+    const text = extractText(previewContent);
+    expect(text).toContain('7-Day Package Schedule');
+    expect(text).toContain('Valid Sessions Scheduled');
+    expect(text).toContain('Total Package Payable');
+    expect(text).toContain('4500.00');
+
+    cleanup();
+  });
+
+  it('submits package booking with packageType in payload when weekly package is booked', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: [getKolkataTomorrowDateString()],
+        sessionCount: 1,
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 1,
+        perSessionFee: 1500,
+        baseSessionFee: 1500,
+        platformCommission: 300,
+        coachAllocation: 1200,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 1500,
+        amountInPaise: 150000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+    (createBooking as any).mockResolvedValue({ _id: 'bk_pkg_001', packageType: 'weekly' });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Switch to weekly package
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Switch to ground venue
+    const groundPill = findElement(tree, (el) => el.props?.testID === 'venue-pill-ground');
+    groundPill.props.onPress();
+    tree = render();
+
+    // Fill phone number
+    const phoneInput = findElement(tree, (el) => el.props?.testID === 'input-booking-phone');
+    phoneInput.props.onChangeText('+919876543210');
+    tree = render();
+
+    // Submit
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Submit Booking Request');
+    await submitBtn.props.onPress();
+
+    expect(createBooking).toHaveBeenCalledWith('test_token', {
+      coachId: 'coach_001',
+      sport: 'boxing',
+      date: getKolkataTomorrowDateString(),
+      startTime: '09:00',
+      endTime: '10:00',
+      venueType: 'ground',
+      trainingAddress: 'Indiranagar Ground',
+      customerPhone: '+919876543210',
+      packageType: 'weekly',
+    });
+
+    cleanup();
+  });
+
+  it('older API responses cannot overwrite newer previews', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+
+    let resolveFirstPreview!: (val: any) => void;
+    const firstPreviewPromise = new Promise((resolve) => {
+      resolveFirstPreview = resolve;
+    });
+
+    const secondPreviewData = {
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: ['2026-11-20', '2026-11-22', '2026-11-24'],
+        sessionCount: 3,
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 3,
+        perSessionFee: 1500,
+        baseSessionFee: 4500,
+        platformCommission: 900,
+        coachAllocation: 3600,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 4500,
+        amountInPaise: 450000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    };
+
+    (getPackagePreview as any)
+      .mockImplementationOnce(() => firstPreviewPromise)
+      .mockImplementationOnce(() => Promise.resolve(secondPreviewData));
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Trigger request 1 by pressing weekly pill
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+
+    // Trigger request 2 by pressing monthly pill
+    const monthlyPill = findElement(tree, (el) => el.props?.testID === 'package-option-monthly');
+    await monthlyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify request 2 preview is now visible
+    let previewContent = findElement(tree, (el) => el.props?.testID === 'package-preview-content');
+    expect(previewContent).not.toBeNull();
+    expect(extractText(previewContent)).toMatch(/3\s+Valid Sessions Scheduled/);
+
+    // Now resolve the older request 1 with stale data
+    resolveFirstPreview({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: ['2026-11-20'],
+        sessionCount: 1, // Stale count
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 1,
+        perSessionFee: 1500,
+        baseSessionFee: 1500,
+        platformCommission: 300,
+        coachAllocation: 1200,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 1500,
+        amountInPaise: 150000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    await flushPromises();
+    tree = render();
+
+    // Verify that the stale preview was discarded and did NOT overwrite request 2
+    previewContent = findElement(tree, (el) => el.props?.testID === 'package-preview-content');
+    expect(previewContent).not.toBeNull();
+    expect(extractText(previewContent)).toMatch(/3\s+Valid Sessions Scheduled/);
+    expect(extractText(previewContent)).not.toMatch(/1\s+Valid Sessions Scheduled/);
+
+    cleanup();
+  });
+
+  it('changing coach, date, time, or package type invalidates the previous preview', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: ['2026-11-20', '2026-11-22'],
+        sessionCount: 2,
+        skippedDates: [],
+        isValid: true,
+        isInvalid: false,
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 2,
+        perSessionFee: 1500,
+        baseSessionFee: 3000,
+        platformCommission: 600,
+        coachAllocation: 2400,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 3000,
+        amountInPaise: 300000,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select weekly package
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Preview content is visible
+    expect(findElement(tree, (el) => el.props?.testID === 'package-preview-content')).not.toBeNull();
+
+    // 1. Changing date invalidates previous preview immediately
+    const dateInput = findElement(tree, (el) => el.props?.testID === 'input-booking-date');
+    dateInput.props.onChangeText('2026-12-05');
+    tree = render();
+    expect(findElement(tree, (el) => el.props?.testID === 'package-preview-content')).toBeNull();
+
+    // 2. Changing start time invalidates preview
+    const startInput = findElement(tree, (el) => el.props?.testID === 'input-booking-start');
+    startInput.props.onChangeText('11:00');
+    tree = render();
+    expect(findElement(tree, (el) => el.props?.testID === 'package-preview-content')).toBeNull();
+
+    // 3. Changing end time invalidates preview
+    const endInput = findElement(tree, (el) => el.props?.testID === 'input-booking-end');
+    endInput.props.onChangeText('12:00');
+    tree = render();
+    expect(findElement(tree, (el) => el.props?.testID === 'package-preview-content')).toBeNull();
+
+    // 4. Switching to single package clears preview container
+    const singlePill = findElement(tree, (el) => el.props?.testID === 'package-option-single');
+    singlePill.props.onPress();
+    tree = render();
+    expect(findElement(tree, (el) => el.props?.testID === 'package-preview-container')).toBeNull();
+
+    cleanup();
+  });
+
+  it('missing or invalid preview disables submission and blocks booking request', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: [],
+        sessionCount: 0,
+        skippedDates: [],
+        isValid: false,
+        isInvalid: true,
+        invalidationReason: 'Coach is unavailable on 2026-11-22 (blackout date).',
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 0,
+        perSessionFee: 1500,
+        baseSessionFee: 0,
+        platformCommission: 0,
+        coachAllocation: 0,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 0,
+        amountInPaise: 0,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select weekly package
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify submit button is disabled
+    const submitBtn = findElement(tree, (el) => el.props?.title === 'Submit Booking Request');
+    expect(submitBtn.props.disabled).toBe(true);
+
+    // Attempting to press submit button does not call createBooking
+    await submitBtn.props.onPress();
+    expect(createBooking).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it('an invalidation reason is displayed correctly when schedule is invalid', async () => {
+    (getPublicCoaches as any).mockResolvedValue(mockCoachesList);
+    (getPackagePreview as any).mockResolvedValue({
+      preview: {
+        packageType: 'weekly',
+        startDate: getKolkataTomorrowDateString(),
+        endDate: '2026-11-26',
+        totalDaysInWindow: 7,
+        sessionDates: [],
+        sessionCount: 0,
+        skippedDates: [],
+        isValid: false,
+        isInvalid: true,
+        invalidationReason: 'Coach is unavailable on 2026-11-24 (blackout date).',
+      },
+      pricing: {
+        hourlyRate: 1500,
+        durationMinutes: 60,
+        sessionCount: 0,
+        perSessionFee: 1500,
+        baseSessionFee: 0,
+        platformCommission: 0,
+        coachAllocation: 0,
+        taxRatePercentage: 0,
+        taxAmount: 0,
+        totalCustomerPayable: 0,
+        amountInPaise: 0,
+        taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+      },
+    });
+
+    const { render, cleanup } = createInteractiveHarness(
+      React.createElement(BookingRequestModal, {
+        visible: true,
+        onClose: vi.fn(),
+        token: 'test_token',
+        initialCoachId: 'coach_001',
+      })
+    );
+
+    await flushPromises();
+    let tree = render();
+
+    // Select weekly package
+    const weeklyPill = findElement(tree, (el) => el.props?.testID === 'package-option-weekly');
+    await weeklyPill.props.onPress();
+    await flushPromises();
+    tree = render();
+
+    // Verify warning box displays the invalidation reason
+    const warningBox = findElement(tree, (el) => el.props?.testID === 'package-zero-sessions-warning');
+    expect(warningBox).not.toBeNull();
+    const warningText = extractText(warningBox);
+    expect(warningText).toContain('Coach is unavailable on 2026-11-24 (blackout date).');
 
     cleanup();
   });

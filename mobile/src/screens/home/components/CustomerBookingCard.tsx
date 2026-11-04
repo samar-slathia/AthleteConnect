@@ -194,6 +194,17 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
           <Text style={styles.sportText}>{booking.sport?.toUpperCase() || 'SESSION'}</Text>
         </View>
         <View style={styles.headerBadgesRow}>
+          {booking.packageType && booking.packageType !== 'single' ? (
+            <View style={styles.packageBadge} testID={`package-badge-${booking._id}`}>
+              <Text style={styles.packageBadgeText}>
+                {`${booking.packageType === 'weekly' ? '7-Day Pkg' : 'Monthly Pkg'}${
+                  booking.packageSessionIndex && booking.packageSessionCount
+                    ? ` • ${booking.packageSessionIndex}/${booking.packageSessionCount}`
+                    : ''
+                }`}
+              </Text>
+            </View>
+          ) : null}
           {isPaid ? (
             <View style={styles.paidBadge} testID={`paid-badge-${booking._id}`}>
               <CheckCircle size={11} color={COLORS.success} />
@@ -613,6 +624,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  packageBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: RADII.full,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  packageBadgeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#3730A3',
+    letterSpacing: 0.4,
   },
   paidBadge: {
     flexDirection: 'row',

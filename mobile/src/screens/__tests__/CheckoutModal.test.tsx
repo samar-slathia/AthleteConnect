@@ -648,5 +648,73 @@ describe('Phase 1B.2B: Genuine Razorpay Standard Checkout & Prepaid UPI Integrat
       expect(refundNotice).not.toBeNull();
       expect(extractText(refundNotice)).toContain('Refund initiated — awaiting bank processing');
     });
+
+    it('shows package badge on CustomerBookingCard for weekly and monthly packages', () => {
+      const weeklyBooking: BookingItem = {
+        ...mockBooking,
+        packageType: 'weekly',
+        packageSessionIndex: 1,
+        packageSessionCount: 3,
+      };
+
+      const tree = CustomerBookingCard({
+        booking: weeklyBooking,
+      });
+
+      const pkgBadge = findByTestId(tree, `package-badge-${weeklyBooking._id}`);
+      expect(pkgBadge).not.toBeNull();
+      expect(extractText(pkgBadge)).toContain('7-Day Pkg • 1/3');
+    });
+
+    it('displays package information in CheckoutModal for package bookings', async () => {
+      const packageBooking: BookingItem = {
+        ...mockBooking,
+        packageType: 'weekly',
+        packageSessionCount: 3,
+        packageStartDate: '2026-11-20',
+        packageEndDate: '2026-11-26',
+      };
+
+      vi.spyOn(paymentApi, 'createPaymentOrder').mockResolvedValue({
+        orderId: 'order_pkg_test',
+        amount: 3600,
+        amountInPaise: 360000,
+        currency: 'INR',
+        keyId: 'rzp_test_mock',
+        packageType: 'weekly',
+        sessionCount: 3,
+        breakdown: {
+          coachingFee: 3600,
+          sessionCount: 3,
+          perSessionFee: 1200,
+          taxAmount: 0,
+          taxRatePercentage: 0,
+          taxLabel: 'Taxes & Levies (0% Sandbox Mode)',
+          totalPayable: 3600,
+        },
+      });
+
+      const { render, cleanup } = createHarness(
+        React.createElement(CheckoutModal, {
+          visible: true,
+          onClose: vi.fn(),
+          booking: packageBooking,
+          token: 'jwt_token',
+          onSuccess: vi.fn(),
+        })
+      );
+
+      await flushPromises();
+      const tree = render();
+
+      const sessionCard = findElement(tree, (el) => el.props?.style && el.props?.children);
+      const text = extractText(tree);
+      expect(text).toContain('7-Day Coaching Package');
+      expect(text).toContain('Sessions');
+      expect(text).toContain('Package Fee (3 sessions @ ₹1200/session)');
+      expect(text).toContain('₹3600.00');
+
+      cleanup();
+    });
   });
 });

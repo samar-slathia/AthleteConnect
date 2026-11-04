@@ -8,6 +8,7 @@ import {
   cancelBooking,
   startBookingSession,
   completeBooking,
+  getPackagePreviewHandler,
 } from '../controllers/bookingController';
 import {
   getBookingMessages,
@@ -26,6 +27,9 @@ bookingRouter.post('/', authenticate, requireRole('parent', 'individual'), creat
 
 // List bookings (Scoped to authenticated user)
 bookingRouter.get('/', authenticate, getBookings);
+
+// Authoritative package schedule & pricing preview (before :id wildcard)
+bookingRouter.get('/package-preview', authenticate, getPackagePreviewHandler);
 
 // Get single booking
 bookingRouter.get('/:id', authenticate, getBookingById);

@@ -6,6 +6,8 @@ import {
   COACH_DISCIPLINES,
   VENUE_TYPES,
   ACTIVE_VENUE_TYPES,
+  PACKAGE_TYPES,
+  PackageType,
   MIN_BOOKING_DURATION_MINUTES,
   MAX_BOOKING_DURATION_MINUTES,
   MAX_REASON_LENGTH,
@@ -20,6 +22,12 @@ import { CoachProfile } from '../models/CoachProfile';
 import { CoachAvailability, getCivilDayOfWeek, isIntervalInsideSlots } from '../models/CoachAvailability';
 import { Review } from '../models/Review';
 import { executeScheduleMutationWithRetry, ScheduleConflictError } from '../utils/scheduleLock';
+import {
+  generatePackageSchedule,
+  getPackageDurationDays,
+  addDaysToDateString,
+} from '../utils/packageSchedule';
+import { calculatePaymentBreakdown } from '../services/razorpayService';
 import { config } from '../config/env';
 
 const ALLOWED_CREATE_FIELDS = new Set([
@@ -33,6 +41,7 @@ const ALLOWED_CREATE_FIELDS = new Set([
   'customerPhone',
   'locationCoordinates',
   'coordinates',
+  'packageType',
 ]);
 
 /**
@@ -205,11 +214,126 @@ export async function createBooking(
       }
     }
 
+    // 9b. Validate optional packageType
+    const rawPkgType = req.body.packageType;
+    const packageType: PackageType = rawPkgType ? (String(rawPkgType).trim() as PackageType) : 'single';
+    if (!PACKAGE_TYPES.includes(packageType)) {
+      return res.status(400).json({
+        error: `Invalid packageType "${rawPkgType}". Allowed package types are: ${PACKAGE_TYPES.join(', ')}.`,
+      });
+    }
+
     // 10. Coach Availability validation (must have configured slots, blackout dates & continuous slot containment)
     const coachAvailability = await CoachAvailability.findOne({ userId: cleanCoachId });
     if (!coachAvailability || !Array.isArray(coachAvailability.slots) || coachAvailability.slots.length === 0) {
       return res.status(400).json({
         error: `Coach ${coachUser.name} has not configured availability for this date. Please choose another coach or date.`,
+      });
+    }
+
+    if (packageType !== 'single') {
+      // Multi-session Package Flow (Weekly / Monthly)
+      const durationDays = getPackageDurationDays(packageType);
+      const endDate = addDaysToDateString(cleanDate, durationDays - 1);
+
+      // Fetch existing accepted/in_progress bookings across the window to respect existing bookings
+      let existingBookings: Array<{ date: string; startMinutes: number; endMinutes: number }> = [];
+      try {
+        existingBookings = await Booking.find({
+          coachId: cleanCoachId,
+          date: { $gte: cleanDate, $lte: endDate },
+          status: { $in: ['accepted', 'in_progress'] },
+        }).select('date startMinutes endMinutes');
+      } catch {
+        existingBookings = [];
+      }
+
+      const schedule = generatePackageSchedule({
+        startDate: cleanDate,
+        packageType,
+        startTime: startTime.trim(),
+        endTime: endTime.trim(),
+        coachAvailabilitySlots: coachAvailability.slots,
+        unavailableDates: coachAvailability.unavailableDates || [],
+        existingBookings,
+      });
+
+      if (schedule.isInvalid) {
+        return res.status(409).json({
+          error:
+            schedule.invalidationReason ||
+            'Package schedule conflicts with coach blackout dates or existing bookings.',
+          code: 'SCHEDULE_CONFLICT',
+        });
+      }
+
+      if (schedule.sessionCount === 0) {
+        return res.status(400).json({
+          error: `No available coaching sessions found for Coach ${coachUser.name} during the selected ${schedule.totalDaysInWindow}-day window (${cleanDate} to ${schedule.endDate}). Please select another start date or time.`,
+        });
+      }
+
+      const hourlyRate = coachProfile?.hourlyRate || 1000;
+      const breakdown = calculatePaymentBreakdown({
+        hourlyRate,
+        durationMinutes: timeValidation.durationMinutes!,
+        sessionCount: schedule.sessionCount,
+        taxRatePercentage: config.TAX_RATE_PERCENTAGE,
+      });
+
+      const packageGroupId = new mongoose.Types.ObjectId();
+      const sessionDocs: any[] = [];
+
+      for (let idx = 0; idx < schedule.sessionDates.length; idx++) {
+        const sessionDate = schedule.sessionDates[idx];
+        const sBooking = new Booking({
+          customerId: new mongoose.Types.ObjectId(req.user.id),
+          coachId: new mongoose.Types.ObjectId(cleanCoachId),
+          sport: cleanSport,
+          date: sessionDate,
+          startTime: startTime.trim(),
+          endTime: endTime.trim(),
+          startMinutes: timeValidation.startMinutes,
+          endMinutes: timeValidation.endMinutes,
+          durationMinutes: timeValidation.durationMinutes,
+          venueType: cleanVenueType,
+          trainingAddress: cleanAddress,
+          customerPhone: cleanPhone,
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          hourlyRateSnapshot: hourlyRate,
+          locationCoordinates: cleanCoordinates,
+          packageType,
+          packageGroupId,
+          packageSessionIndex: idx + 1,
+          packageSessionCount: schedule.sessionCount,
+          packageStartDate: cleanDate,
+          packageEndDate: schedule.endDate,
+          packageTotalAmount: breakdown.totalCustomerPayable,
+        });
+
+        await sBooking.save();
+        sessionDocs.push(sBooking);
+      }
+
+      const primaryBooking = sessionDocs[0];
+      const serialized = serializeBookingForUser(primaryBooking, req.user.id, req.user.role, {
+        customerName: req.user.name,
+        coachName: coachUser.name,
+      });
+
+      return res.status(201).json({
+        booking: serialized,
+        package: {
+          packageGroupId: packageGroupId.toString(),
+          packageType,
+          startDate: cleanDate,
+          endDate: schedule.endDate,
+          sessionCount: schedule.sessionCount,
+          sessionDates: schedule.sessionDates,
+          pricing: breakdown,
+        },
+        message: `Package booking request (${schedule.sessionCount} sessions) submitted successfully.`,
       });
     }
 
@@ -501,82 +625,183 @@ export async function acceptBooking(
         );
       }
 
-      // 4. Validate blackout date
-      if (
-        Array.isArray(coachAvailability.unavailableDates) &&
-        coachAvailability.unavailableDates.includes(freshBooking.date)
-      ) {
-        throw new ScheduleConflictError(
-          `Cannot accept booking: Coach is unavailable on ${freshBooking.date} (blackout date).`,
-          409
-        );
-      }
-
-      // 5. Validate complete requested time interval against working slot
-      const dayOfWeek = getCivilDayOfWeek(freshBooking.date);
-      const fitsInSlot = isIntervalInsideSlots(
-        coachAvailability.slots,
-        dayOfWeek,
-        freshBooking.startMinutes,
-        freshBooking.endMinutes
-      );
-      if (!fitsInSlot) {
-        throw new ScheduleConflictError(
-          `Cannot accept booking: Requested time interval (${freshBooking.startTime}–${freshBooking.endTime}) is outside current configured availability slots for ${dayOfWeek}.`,
-          409
-        );
-      }
-
-      // 5. Query for conflicting accepted or in_progress bookings on the same calendar date
-      let conflictQuery = Booking.findOne({
-        coachId: booking.coachId?._id || booking.coachId,
-        date: booking.date,
-        status: { $in: ['accepted', 'in_progress'] },
-        _id: { $ne: booking._id },
-        startMinutes: { $lt: booking.endMinutes },
-        endMinutes: { $gt: booking.startMinutes },
-      });
-      if (session && conflictQuery.session) {
-        conflictQuery = conflictQuery.session(session);
-      }
-      const conflictingBooking = await conflictQuery;
-
-      if (conflictingBooking) {
-        throw new ScheduleConflictError(
-          `Cannot accept booking. Overlaps with an already accepted session (${conflictingBooking.startTime}–${conflictingBooking.endTime}).`,
-          409
-        );
-      }
-
-      // 6. Conditionally transition booking from pending to accepted (verifying matchedCount === 1)
+      // 4. Validate package sessions or single session against coach availability & schedule conflicts
       const paymentExpiryMinutes = config.PAYMENT_EXPIRY_MINUTES || 120;
       const paymentDueAt = new Date(Date.now() + paymentExpiryMinutes * 60 * 1000);
-
       let matchedCount = 1;
-      if (mongoose.connection.readyState === 1 && !(freshBooking as any).save?.mock) {
-        const updateOpts: any = {};
-        if (session) updateOpts.session = session;
 
-        const updateRes = await Booking.updateOne(
-          {
-            _id: freshBooking._id,
+      if (freshBooking.packageGroupId) {
+        // Multi-session Package Acceptance: All sessions must be atomically validated and accepted together
+        let pkgQuery = Booking.find({ packageGroupId: freshBooking.packageGroupId });
+        if (session && pkgQuery.session) {
+          pkgQuery = pkgQuery.session(session);
+        }
+        const packageSessions = (await pkgQuery) || [freshBooking];
+        const packageSessionIds = packageSessions.map((s) => s._id);
+
+        const anyNonPending = packageSessions.some((s) => s.status !== 'pending');
+        if (anyNonPending) {
+          throw new ScheduleConflictError(
+            'Package booking state changed concurrently. One or more sessions are no longer pending.',
+            409
+          );
+        }
+
+        // Verify every required date and time slot for the package
+        for (const s of packageSessions) {
+          // Check blackout date
+          if (Array.isArray(coachAvailability.unavailableDates) && coachAvailability.unavailableDates.includes(s.date)) {
+            throw new ScheduleConflictError(
+              `Cannot accept package: Coach is unavailable on ${s.date} (blackout date).`,
+              409
+            );
+          }
+
+          // Check working interval
+          const sDayOfWeek = getCivilDayOfWeek(s.date);
+          const sFits = isIntervalInsideSlots(
+            coachAvailability.slots,
+            sDayOfWeek,
+            s.startMinutes,
+            s.endMinutes
+          );
+          if (!sFits) {
+            throw new ScheduleConflictError(
+              `Cannot accept package: Requested time interval (${s.startTime}–${s.endTime}) is outside configured availability on ${sDayOfWeek} (${s.date}).`,
+              409
+            );
+          }
+
+          // Query for conflicting accepted/in_progress bookings
+          let sConflictQuery = Booking.findOne({
             coachId: coachIdStr,
-            status: 'pending',
-          },
-          {
-            $set: {
-              status: 'accepted',
-              paymentDueAt,
+            date: s.date,
+            status: { $in: ['accepted', 'in_progress'] },
+            _id: { $nin: packageSessionIds },
+            startMinutes: { $lt: s.endMinutes },
+            endMinutes: { $gt: s.startMinutes },
+          });
+          if (session && sConflictQuery.session) {
+            sConflictQuery = sConflictQuery.session(session);
+          }
+          const conflicting = await sConflictQuery;
+          if (conflicting) {
+            throw new ScheduleConflictError(
+              `Cannot accept package. Overlaps with an already accepted session on ${s.date} (${conflicting.startTime}–${conflicting.endTime}).`,
+              409
+            );
+          }
+        }
+
+        // Atomically transition all package sessions to accepted
+        if (mongoose.connection.readyState === 1 && !(freshBooking as any).save?.mock) {
+          const updateOpts: any = {};
+          if (session) updateOpts.session = session;
+
+          const updateRes = await Booking.updateMany(
+            {
+              _id: { $in: packageSessionIds },
+              coachId: coachIdStr,
+              status: 'pending',
             },
-          },
-          updateOpts
-        );
-        matchedCount = updateRes.matchedCount;
+            {
+              $set: {
+                status: 'accepted',
+                paymentDueAt,
+              },
+            },
+            updateOpts
+          );
+          matchedCount = updateRes.matchedCount;
+          if (matchedCount < packageSessionIds.length) {
+            throw new ScheduleConflictError(
+              'Package booking state changed concurrently during batch acceptance.',
+              409
+            );
+          }
+        } else {
+          for (const s of packageSessions) {
+            s.status = 'accepted';
+            s.paymentDueAt = paymentDueAt;
+            if (typeof s.save === 'function') {
+              await s.save();
+            }
+          }
+        }
       } else {
-        freshBooking.status = 'accepted';
-        freshBooking.paymentDueAt = paymentDueAt;
-        if (typeof freshBooking.save === 'function') {
-          await freshBooking.save();
+        // Single Session Acceptance Flow
+        // Validate blackout date
+        if (
+          Array.isArray(coachAvailability.unavailableDates) &&
+          coachAvailability.unavailableDates.includes(freshBooking.date)
+        ) {
+          throw new ScheduleConflictError(
+            `Cannot accept booking: Coach is unavailable on ${freshBooking.date} (blackout date).`,
+            409
+          );
+        }
+
+        // Validate complete requested time interval against working slot
+        const dayOfWeek = getCivilDayOfWeek(freshBooking.date);
+        const fitsInSlot = isIntervalInsideSlots(
+          coachAvailability.slots,
+          dayOfWeek,
+          freshBooking.startMinutes,
+          freshBooking.endMinutes
+        );
+        if (!fitsInSlot) {
+          throw new ScheduleConflictError(
+            `Cannot accept booking: Requested time interval (${freshBooking.startTime}–${freshBooking.endTime}) is outside current configured availability slots for ${dayOfWeek}.`,
+            409
+          );
+        }
+
+        // Query for conflicting accepted or in_progress bookings on the same calendar date
+        let conflictQuery = Booking.findOne({
+          coachId: booking.coachId?._id || booking.coachId,
+          date: booking.date,
+          status: { $in: ['accepted', 'in_progress'] },
+          _id: { $ne: booking._id },
+          startMinutes: { $lt: booking.endMinutes },
+          endMinutes: { $gt: booking.startMinutes },
+        });
+        if (session && conflictQuery.session) {
+          conflictQuery = conflictQuery.session(session);
+        }
+        const conflictingBooking = await conflictQuery;
+
+        if (conflictingBooking) {
+          throw new ScheduleConflictError(
+            `Cannot accept booking. Overlaps with an already accepted session (${conflictingBooking.startTime}–${conflictingBooking.endTime}).`,
+            409
+          );
+        }
+
+        if (mongoose.connection.readyState === 1 && !(freshBooking as any).save?.mock) {
+          const updateOpts: any = {};
+          if (session) updateOpts.session = session;
+
+          const updateRes = await Booking.updateOne(
+            {
+              _id: freshBooking._id,
+              coachId: coachIdStr,
+              status: 'pending',
+            },
+            {
+              $set: {
+                status: 'accepted',
+                paymentDueAt,
+              },
+            },
+            updateOpts
+          );
+          matchedCount = updateRes.matchedCount;
+        } else {
+          freshBooking.status = 'accepted';
+          freshBooking.paymentDueAt = paymentDueAt;
+          if (typeof freshBooking.save === 'function') {
+            await freshBooking.save();
+          }
         }
       }
 
@@ -663,6 +888,13 @@ export async function rejectBooking(
     booking.status = 'rejected';
     await booking.save();
 
+    if (booking.packageGroupId) {
+      await Booking.updateMany(
+        { packageGroupId: booking.packageGroupId, status: 'pending' },
+        { $set: { status: 'rejected', rejectionReason: booking.rejectionReason } }
+      );
+    }
+
     const serialized = serializeBookingForUser(booking, req.user.id, req.user.role);
 
     return res.status(200).json({
@@ -733,6 +965,19 @@ export async function cancelBooking(
     booking.cancelledBy = isCustomer ? 'customer' : 'coach';
     // Payment status is preserved independently
     await booking.save();
+
+    if (booking.packageGroupId) {
+      await Booking.updateMany(
+        { packageGroupId: booking.packageGroupId, status: { $in: ['pending', 'accepted'] } },
+        {
+          $set: {
+            status: 'cancelled',
+            cancellationReason: booking.cancellationReason,
+            cancelledBy: booking.cancelledBy,
+          },
+        }
+      );
+    }
 
     const serialized = serializeBookingForUser(booking, req.user.id, req.user.role);
 
@@ -1025,6 +1270,106 @@ export async function completeBooking(
     return res.status(200).json({
       booking: serialized,
       message: 'Session completed successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Authoritative preview of package dates and pricing breakdown.
+ * GET /api/bookings/package-preview
+ * Query: coachId, packageType, startDate, startTime, endTime
+ */
+export async function getPackagePreviewHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    const { coachId, packageType, startDate, startTime, endTime } = req.query;
+
+    if (!coachId || typeof coachId !== 'string' || !mongoose.Types.ObjectId.isValid(coachId.trim())) {
+      return res.status(400).json({ error: 'Valid coachId query parameter is required.' });
+    }
+    const cleanCoachId = coachId.trim();
+
+    const cleanPkgType = (typeof packageType === 'string' ? packageType.trim() : 'single') as PackageType;
+    if (!PACKAGE_TYPES.includes(cleanPkgType)) {
+      return res.status(400).json({
+        error: `Invalid packageType "${packageType}". Allowed types are: ${PACKAGE_TYPES.join(', ')}.`,
+      });
+    }
+
+    if (!startDate || typeof startDate !== 'string' || !isValidCalendarDate(startDate.trim())) {
+      return res.status(400).json({ error: 'Valid startDate in YYYY-MM-DD format is required.' });
+    }
+    const cleanStartDate = startDate.trim();
+
+    const todayStr = getKolkataDateString();
+    if (cleanStartDate < todayStr) {
+      return res.status(400).json({ error: `Start date cannot be in the past (${cleanStartDate}).` });
+    }
+
+    if (typeof startTime !== 'string' || typeof endTime !== 'string') {
+      return res.status(400).json({ error: 'startTime and endTime in HH:mm format are required.' });
+    }
+
+    const timeValidation = validateBookingTimes(startTime, endTime);
+    if (!timeValidation.valid) {
+      return res.status(400).json({ error: timeValidation.error });
+    }
+
+    // Verify coach existence and role
+    const coachUser = await User.findById(cleanCoachId);
+    if (!coachUser || !coachUser.isActive || coachUser.role !== 'coach') {
+      return res.status(404).json({ error: 'Coach not found or account is inactive.' });
+    }
+
+    // Coach profile for hourly rate
+    const coachProfile = await CoachProfile.findOne({ userId: cleanCoachId });
+    const hourlyRate = coachProfile?.hourlyRate || 1000;
+
+    // Coach availability
+    const coachAvailability = await CoachAvailability.findOne({ userId: cleanCoachId });
+    const slots = coachAvailability?.slots || [];
+    const unavailableDates = coachAvailability?.unavailableDates || [];
+
+    // Query existing bookings across the package window
+    const durationDays = getPackageDurationDays(cleanPkgType);
+    const endDate = addDaysToDateString(cleanStartDate, durationDays - 1);
+
+    let existingBookings: Array<{ date: string; startMinutes: number; endMinutes: number }> = [];
+    try {
+      existingBookings = await Booking.find({
+        coachId: cleanCoachId,
+        date: { $gte: cleanStartDate, $lte: endDate },
+        status: { $in: ['accepted', 'in_progress'] },
+      }).select('date startMinutes endMinutes');
+    } catch {
+      existingBookings = [];
+    }
+
+    const schedule = generatePackageSchedule({
+      startDate: cleanStartDate,
+      packageType: cleanPkgType,
+      startTime: startTime.trim(),
+      endTime: endTime.trim(),
+      coachAvailabilitySlots: slots,
+      unavailableDates,
+      existingBookings,
+    });
+
+    const pricing = calculatePaymentBreakdown({
+      hourlyRate,
+      durationMinutes: timeValidation.durationMinutes!,
+      sessionCount: schedule.sessionCount,
+      taxRatePercentage: config.TAX_RATE_PERCENTAGE,
+    });
+
+    return res.status(200).json({
+      preview: schedule,
+      pricing,
     });
   } catch (error) {
     return next(error);

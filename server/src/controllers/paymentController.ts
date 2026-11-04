@@ -51,50 +51,108 @@ export async function createPaymentOrder(
       });
     }
 
-    // Lifecycle check: Booking must be accepted
-    if (booking.status === 'pending') {
-      return res.status(400).json({
-        error: 'Cannot initiate payment for a pending booking. Please wait for the coach to accept your request.',
+    let sessionCount = 1;
+    let packageBookings: any[] = [];
+    if (booking.packageGroupId) {
+      packageBookings = await Booking.find({ packageGroupId: booking.packageGroupId }).sort({
+        packageSessionIndex: 1,
       });
-    }
+      sessionCount = packageBookings.length || 1;
 
-    if (booking.status !== 'accepted') {
-      return res.status(400).json({
-        error: `Cannot initiate payment for booking with status "${booking.status}". Only accepted bookings can be paid.`,
-      });
-    }
+      // Lifecycle check for package: all sessions must be accepted
+      const hasPending = packageBookings.some((b) => b.status === 'pending');
+      if (hasPending) {
+        return res.status(400).json({
+          error: 'Cannot initiate payment for a pending package. Please wait for the coach to accept your request.',
+        });
+      }
 
-    // Payment state check
-    if (booking.paymentStatus === 'paid' || booking.paymentStatus === 'partially_refunded') {
-      return res.status(400).json({
-        error: 'This booking has already been paid.',
-      });
-    }
+      const invalidStatusBooking = packageBookings.find((b) => b.status !== 'accepted');
+      if (invalidStatusBooking) {
+        return res.status(400).json({
+          error: `Cannot initiate payment for package with status "${invalidStatusBooking.status}". Only accepted packages can be paid.`,
+        });
+      }
 
-    if (booking.paymentStatus === 'refunded') {
-      return res.status(400).json({
-        error: 'This booking was refunded. Please request a new booking session.',
-        code: 'BOOKING_REFUNDED',
-      });
+      const alreadyPaid = packageBookings.every(
+        (b) => b.paymentStatus === 'paid' || b.paymentStatus === 'partially_refunded'
+      );
+      if (alreadyPaid) {
+        return res.status(400).json({
+          error: 'This package has already been paid.',
+        });
+      }
+
+      const allRefunded = packageBookings.every((b) => b.paymentStatus === 'refunded');
+      if (allRefunded) {
+        return res.status(400).json({
+          error: 'This package was refunded. Please request a new package.',
+          code: 'BOOKING_REFUNDED',
+        });
+      }
+    } else {
+      // Lifecycle check: Single booking must be accepted
+      if (booking.status === 'pending') {
+        return res.status(400).json({
+          error: 'Cannot initiate payment for a pending booking. Please wait for the coach to accept your request.',
+        });
+      }
+
+      if (booking.status !== 'accepted') {
+        return res.status(400).json({
+          error: `Cannot initiate payment for booking with status "${booking.status}". Only accepted bookings can be paid.`,
+        });
+      }
+
+      // Payment state check
+      if (booking.paymentStatus === 'paid' || booking.paymentStatus === 'partially_refunded') {
+        return res.status(400).json({
+          error: 'This booking has already been paid.',
+        });
+      }
+
+      if (booking.paymentStatus === 'refunded') {
+        return res.status(400).json({
+          error: 'This booking was refunded. Please request a new booking session.',
+          code: 'BOOKING_REFUNDED',
+        });
+      }
     }
 
     // Payment window expiration check
     if (booking.paymentDueAt && new Date() > new Date(booking.paymentDueAt)) {
-      // Safely transition overdue unpaid booking to cancelled
-      await Booking.updateOne(
-        {
-          _id: booking._id,
-          status: 'accepted',
-          paymentStatus: 'unpaid',
-        },
-        {
-          $set: {
-            status: 'cancelled',
-            cancellationReason: 'Payment window expired before completion.',
-            cancelledBy: 'customer',
+      // Safely transition overdue unpaid booking(s) to cancelled
+      if (booking.packageGroupId) {
+        await Booking.updateMany(
+          {
+            packageGroupId: booking.packageGroupId,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
           },
-        }
-      );
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      } else {
+        await Booking.updateOne(
+          {
+            _id: booking._id,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
+          },
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      }
 
       return res.status(400).json({
         error: 'The payment window for this booking has expired. The booking has been cancelled.',
@@ -102,9 +160,12 @@ export async function createPaymentOrder(
       });
     }
 
-    // Check for existing active (unexpired) order for this booking
+    // Check for existing active (unexpired) order for this booking / package
     const existingTx = await PaymentTransaction.findOne({
-      bookingId: booking._id,
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
       status: 'created',
       orderExpiresAt: { $gt: new Date() },
     });
@@ -117,8 +178,15 @@ export async function createPaymentOrder(
         amountInPaise: existingTx.amountInPaise,
         currency: existingTx.currency,
         keyId: config.RAZORPAY_KEY_ID,
+        ...(booking.packageGroupId ? {
+          packageType: existingTx.packageType || booking.packageType || 'single',
+          sessionCount: existingTx.sessionCount || sessionCount,
+        } : {}),
         breakdown: {
           coachingFee: existingTx.baseSessionFee,
+          ...(booking.packageGroupId ? {
+            sessionCount: existingTx.sessionCount || sessionCount,
+          } : {}),
           taxAmount: existingTx.taxAmount,
           taxRatePercentage: existingTx.taxRatePercentage,
           taxLabel:
@@ -143,11 +211,17 @@ export async function createPaymentOrder(
     const breakdown = calculatePaymentBreakdown({
       hourlyRate,
       durationMinutes,
+      sessionCount,
       taxRatePercentage: config.TAX_RATE_PERCENTAGE,
     });
 
     // Create Razorpay Test Order directly with payment gateway
-    const receipt = `rcpt_${booking._id.toString().substring(0, 10)}_${Date.now()}`;
+    const receiptPrefix = booking.packageGroupId ? 'pkg' : 'rcpt';
+    const idPrefix = booking.packageGroupId
+      ? booking.packageGroupId.toString().substring(0, 8)
+      : booking._id.toString().substring(0, 10);
+    const receipt = `${receiptPrefix}_${idPrefix}_${Date.now()}`;
+
     let razorpayOrder;
     try {
       razorpayOrder = await createRazorpayOrder({
@@ -156,6 +230,9 @@ export async function createPaymentOrder(
         receipt,
         notes: {
           bookingId: booking._id.toString(),
+          packageGroupId: booking.packageGroupId ? booking.packageGroupId.toString() : '',
+          packageType: booking.packageType || 'single',
+          sessionCount: String(sessionCount),
           customerId: req.user.id,
           coachId: booking.coachId.toString(),
         },
@@ -171,6 +248,9 @@ export async function createPaymentOrder(
     const orderExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 mins order validity
     const transaction = new PaymentTransaction({
       bookingId: booking._id,
+      packageGroupId: booking.packageGroupId,
+      packageType: booking.packageType || 'single',
+      sessionCount,
       customerId: booking.customerId,
       coachId: booking.coachId,
       currency: 'INR',
@@ -191,9 +271,16 @@ export async function createPaymentOrder(
 
     await transaction.save();
 
-    // Link transaction reference to booking
-    booking.paymentTransactionId = transaction._id;
-    await booking.save();
+    // Link transaction reference to booking (or all package bookings)
+    if (booking.packageGroupId) {
+      await Booking.updateMany(
+        { packageGroupId: booking.packageGroupId },
+        { $set: { paymentTransactionId: transaction._id } }
+      );
+    } else {
+      booking.paymentTransactionId = transaction._id;
+      await booking.save();
+    }
 
     // Customer-facing response strictly shows: coaching fee, tax, and total payable
     return res.status(201).json({
@@ -202,8 +289,16 @@ export async function createPaymentOrder(
       amountInPaise: breakdown.amountInPaise,
       currency: 'INR',
       keyId: config.RAZORPAY_KEY_ID,
+      ...(booking.packageGroupId ? {
+        packageType: booking.packageType || 'single',
+        sessionCount,
+      } : {}),
       breakdown: {
         coachingFee: breakdown.baseSessionFee,
+        ...(booking.packageGroupId ? {
+          sessionCount: breakdown.sessionCount,
+          perSessionFee: breakdown.perSessionFee,
+        } : {}),
         taxAmount: breakdown.taxAmount,
         taxRatePercentage: breakdown.taxRatePercentage,
         taxLabel: breakdown.taxLabel,
@@ -272,9 +367,12 @@ export async function verifyPaymentSignature(
       });
     }
 
-    // Find matching transaction by booking and order ID
+    // Find matching transaction by booking/package and order ID
     const transaction = await PaymentTransaction.findOne({
-      bookingId: booking._id,
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
       razorpayOrderId: cleanOrderId,
     });
 
@@ -463,6 +561,21 @@ export async function verifyPaymentSignature(
     }
 
     // Atomic conditional booking transition: strictly requires status 'accepted'
+    if (transaction.packageGroupId) {
+      await Booking.updateMany(
+        {
+          packageGroupId: transaction.packageGroupId,
+          status: 'accepted',
+        },
+        {
+          $set: {
+            paymentStatus: 'paid',
+            paymentTransactionId: transaction._id,
+          },
+        }
+      );
+    }
+
     const updatedBooking = await Booking.findOneAndUpdate(
       {
         _id: booking._id,
@@ -662,7 +775,14 @@ export async function applyRefundEventToTransaction(params: {
 
             await transaction.save({ session: currentSession });
 
-            if (transaction.bookingId) {
+            if (transaction.packageGroupId) {
+              const bQuery = Booking.updateMany(
+                { packageGroupId: transaction.packageGroupId },
+                { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
+              );
+              if (currentSession) bQuery.session(currentSession);
+              await bQuery;
+            } else if (transaction.bookingId) {
               const bQuery = Booking.updateOne(
                 { _id: transaction.bookingId },
                 { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
@@ -679,7 +799,14 @@ export async function applyRefundEventToTransaction(params: {
 
             await transaction.save({ session: currentSession });
 
-            if (transaction.bookingId) {
+            if (transaction.packageGroupId) {
+              const bQuery = Booking.updateMany(
+                { packageGroupId: transaction.packageGroupId },
+                { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
+              );
+              if (currentSession) bQuery.session(currentSession);
+              await bQuery;
+            } else if (transaction.bookingId) {
               const bQuery = Booking.updateOne(
                 { _id: transaction.bookingId },
                 { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
@@ -692,7 +819,14 @@ export async function applyRefundEventToTransaction(params: {
             transaction.refundStatus = 'partially_refunded';
             await transaction.save({ session: currentSession });
 
-            if (transaction.bookingId) {
+            if (transaction.packageGroupId) {
+              const bQuery = Booking.updateMany(
+                { packageGroupId: transaction.packageGroupId },
+                { $set: { paymentStatus: 'partially_refunded', refundStatus: 'partially_refunded' } }
+              );
+              if (currentSession) bQuery.session(currentSession);
+              await bQuery;
+            } else if (transaction.bookingId) {
               const bQuery = Booking.updateOne(
                 { _id: transaction.bookingId },
                 { $set: { paymentStatus: 'partially_refunded', refundStatus: 'partially_refunded' } }
@@ -916,10 +1050,17 @@ export async function handlePaymentWebhook(
                   }
                 );
 
-                await Booking.updateOne(
-                  { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
-                  { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
-                );
+                if (transaction.packageGroupId) {
+                  await Booking.updateMany(
+                    { packageGroupId: transaction.packageGroupId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                } else {
+                  await Booking.updateOne(
+                    { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                }
               }
             }
           }
@@ -963,10 +1104,17 @@ export async function handlePaymentWebhook(
                   }
                 );
 
-                await Booking.updateOne(
-                  { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
-                  { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
-                );
+                if (transaction.packageGroupId) {
+                  await Booking.updateMany(
+                    { packageGroupId: transaction.packageGroupId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                } else {
+                  await Booking.updateOne(
+                    { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                }
               }
             }
           }
@@ -1129,7 +1277,12 @@ export async function getBookingPaymentStatus(
       });
     }
 
-    const transaction = await PaymentTransaction.findOne({ bookingId: booking._id }).sort({ createdAt: -1 });
+    const transaction = await PaymentTransaction.findOne({
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
+    }).sort({ createdAt: -1 });
 
     // Customer view: coaching fee, tax, total, status, refund details
     if (isCustomer) {
@@ -1138,6 +1291,8 @@ export async function getBookingPaymentStatus(
         paymentStatus: booking.paymentStatus,
         refundStatus: booking.refundStatus || transaction?.refundStatus || 'none',
         paymentDueAt: booking.paymentDueAt,
+        packageType: transaction?.packageType || booking.packageType || 'single',
+        sessionCount: transaction?.sessionCount || booking.packageSessionCount || 1,
         transaction: transaction
           ? {
               orderId: transaction.razorpayOrderId,
@@ -1146,6 +1301,7 @@ export async function getBookingPaymentStatus(
               refundStatus: transaction.refundStatus,
               refundedAmount: transaction.refundedAmountInPaise ? transaction.refundedAmountInPaise / 100 : 0,
               coachingFee: transaction.baseSessionFee,
+              sessionCount: transaction.sessionCount || 1,
               taxAmount: transaction.taxAmount,
               taxRatePercentage: transaction.taxRatePercentage,
               totalAmount: transaction.totalCustomerPayable,
@@ -1391,7 +1547,14 @@ export async function reconcilePaymentWithGateway(paymentId: string): Promise<Re
           transaction.payoutStatus = 'unsettled';
           transaction.refundedAt = transaction.refundedAt || new Date();
 
-          if (transaction.bookingId) {
+          if (transaction.packageGroupId) {
+            const bQuery = Booking.updateMany(
+              { packageGroupId: transaction.packageGroupId },
+              { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
+            );
+            if (currentSession) bQuery.session(currentSession);
+            await bQuery;
+          } else if (transaction.bookingId) {
             const bQuery = Booking.updateOne(
               { _id: transaction.bookingId },
               { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
@@ -1405,7 +1568,14 @@ export async function reconcilePaymentWithGateway(paymentId: string): Promise<Re
           transaction.payoutStatus = 'unsettled';
           transaction.refundedAt = transaction.refundedAt || new Date();
 
-          if (transaction.bookingId) {
+          if (transaction.packageGroupId) {
+            const bQuery = Booking.updateMany(
+              { packageGroupId: transaction.packageGroupId },
+              { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
+            );
+            if (currentSession) bQuery.session(currentSession);
+            await bQuery;
+          } else if (transaction.bookingId) {
             const bQuery = Booking.updateOne(
               { _id: transaction.bookingId },
               { $set: { paymentStatus: 'refunded', refundStatus: 'processed' } }
@@ -1416,7 +1586,14 @@ export async function reconcilePaymentWithGateway(paymentId: string): Promise<Re
         } else if (localCumulativeProcessedPaise > 0) {
           transaction.refundStatus = 'partially_refunded';
 
-          if (transaction.bookingId) {
+          if (transaction.packageGroupId) {
+            const bQuery = Booking.updateMany(
+              { packageGroupId: transaction.packageGroupId },
+              { $set: { paymentStatus: 'partially_refunded', refundStatus: 'partially_refunded' } }
+            );
+            if (currentSession) bQuery.session(currentSession);
+            await bQuery;
+          } else if (transaction.bookingId) {
             const bQuery = Booking.updateOne(
               { _id: transaction.bookingId },
               { $set: { paymentStatus: 'partially_refunded', refundStatus: 'partially_refunded' } }
@@ -1431,7 +1608,14 @@ export async function reconcilePaymentWithGateway(paymentId: string): Promise<Re
 
           if (hasPending) {
             transaction.refundStatus = 'pending';
-            if (transaction.bookingId) {
+            if (transaction.packageGroupId) {
+              const bQuery = Booking.updateMany(
+                { packageGroupId: transaction.packageGroupId, paymentStatus: { $ne: 'refunded' } },
+                { $set: { refundStatus: 'pending' } }
+              );
+              if (currentSession) bQuery.session(currentSession);
+              await bQuery;
+            } else if (transaction.bookingId) {
               const bQuery = Booking.updateOne(
                 { _id: transaction.bookingId, paymentStatus: { $ne: 'refunded' } },
                 { $set: { refundStatus: 'pending' } }
@@ -1441,7 +1625,14 @@ export async function reconcilePaymentWithGateway(paymentId: string): Promise<Re
             }
           } else if (hasFailed) {
             transaction.refundStatus = 'failed';
-            if (transaction.bookingId) {
+            if (transaction.packageGroupId) {
+              const bQuery = Booking.updateMany(
+                { packageGroupId: transaction.packageGroupId, paymentStatus: { $ne: 'refunded' } },
+                { $set: { refundStatus: 'failed' } }
+              );
+              if (currentSession) bQuery.session(currentSession);
+              await bQuery;
+            } else if (transaction.bookingId) {
               const bQuery = Booking.updateOne(
                 { _id: transaction.bookingId, paymentStatus: { $ne: 'refunded' } },
                 { $set: { refundStatus: 'failed' } }

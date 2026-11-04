@@ -23,6 +23,7 @@ import {
   Locate,
   Navigation,
   ShieldCheck,
+  Package,
 } from 'lucide-react-native';
 import {
   getPublicCoaches,
@@ -36,6 +37,10 @@ import {
   VenueType,
   ActiveVenueType,
   CoachDateStatus,
+  PackageType,
+  PACKAGE_TYPES,
+  PackagePreviewResponse,
+  getPackagePreview,
 } from '../../../services/bookingApi';
 import {
   detectDeviceLocation,
@@ -62,6 +67,12 @@ const ALL_VENUES: { id: ActiveVenueType; label: string }[] = [
   { id: 'ground', label: 'Sports Ground' },
 ];
 
+const PACKAGE_OPTIONS: { id: PackageType; label: string; desc: string }[] = [
+  { id: 'single', label: 'Single Session', desc: '1 session' },
+  { id: 'weekly', label: '7-Day Package', desc: '7 days window' },
+  { id: 'monthly', label: 'Monthly Package', desc: '30 days window' },
+];
+
 export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   visible,
   onClose,
@@ -78,6 +89,10 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   // Form State
   const [selectedCoachId, setSelectedCoachId] = useState<string>('');
   const [selectedSport, setSelectedSport] = useState<CoachDiscipline | null>(initialSport || null);
+  const [selectedPackageType, setSelectedPackageType] = useState<PackageType>('single');
+  const [packagePreview, setPackagePreview] = useState<PackagePreviewResponse | null>(null);
+  const [isLoadingPackagePreview, setIsLoadingPackagePreview] = useState<boolean>(false);
+  const [packagePreviewError, setPackagePreviewError] = useState<string | null>(null);
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('09:00');
   const [endTime, setEndTime] = useState<string>('10:00');
@@ -205,6 +220,11 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       setSelectedSport(initialSport || null);
       setSelectedCoachId('');
       setSelectedCoachLocation(null);
+      setSelectedPackageType('single');
+      previewSequenceRef.current += 1;
+      setPackagePreview(null);
+      setPackagePreviewError(null);
+      setIsLoadingPackagePreview(false);
       setTrainingAddress('');
       setHouseNo('');
       setStreet('');
@@ -243,6 +263,134 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     }
   }, [date, startTime, endTime, visible, fetchCoaches]);
 
+  // Request-sequence ref ensuring only the most recent package-preview request updates UI state
+  const previewSequenceRef = useRef<number>(0);
+
+  const invalidatePackagePreview = useCallback(() => {
+    previewSequenceRef.current += 1;
+    setPackagePreview(null);
+    setPackagePreviewError(null);
+    setIsLoadingPackagePreview(false);
+  }, []);
+
+  const fetchPackagePreview = useCallback(
+    async (
+      targetPkgType?: PackageType,
+      targetCoachId?: string,
+      targetDate?: string,
+      targetStartTime?: string,
+      targetEndTime?: string
+    ) => {
+      const pkgType = targetPkgType || selectedPackageType;
+      if (pkgType === 'single') {
+        invalidatePackagePreview();
+        return;
+      }
+
+      const activeCoachId = targetCoachId !== undefined ? targetCoachId : selectedCoachId;
+      const activeDate = (targetDate !== undefined ? targetDate : date).trim();
+      const activeStartTime = (targetStartTime !== undefined ? targetStartTime : startTime).trim();
+      const activeEndTime = (targetEndTime !== undefined ? targetEndTime : endTime).trim();
+
+      const currentSeq = ++previewSequenceRef.current;
+      setPackagePreview(null);
+      setPackagePreviewError(null);
+
+      if (!activeCoachId || !isValidCalendarDate(activeDate) || !token) {
+        setIsLoadingPackagePreview(false);
+        return;
+      }
+
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      if (!timeRegex.test(activeStartTime) || !timeRegex.test(activeEndTime)) {
+        setIsLoadingPackagePreview(false);
+        return;
+      }
+
+      const [sh, sm] = activeStartTime.split(':').map(Number);
+      const [eh, em] = activeEndTime.split(':').map(Number);
+      if (sh * 60 + sm >= eh * 60 + em) {
+        setIsLoadingPackagePreview(false);
+        return;
+      }
+
+      setIsLoadingPackagePreview(true);
+      try {
+        const data = await getPackagePreview(
+          {
+            coachId: activeCoachId,
+            startDate: activeDate,
+            startTime: activeStartTime,
+            endTime: activeEndTime,
+            packageType: pkgType,
+          },
+          token
+        );
+        // Only update UI state if this is still the active request sequence
+        if (previewSequenceRef.current === currentSeq) {
+          setPackagePreview(data);
+        }
+      } catch (err: any) {
+        if (previewSequenceRef.current === currentSeq) {
+          setPackagePreview(null);
+          setPackagePreviewError(err?.message || 'Failed to preview package schedule.');
+        }
+      } finally {
+        if (previewSequenceRef.current === currentSeq) {
+          setIsLoadingPackagePreview(false);
+        }
+      }
+    },
+    [selectedPackageType, selectedCoachId, date, startTime, endTime, token, invalidatePackagePreview]
+  );
+
+  const handleSelectPackageType = (pkgType: PackageType) => {
+    setSelectedPackageType(pkgType);
+    invalidatePackagePreview();
+    if (pkgType !== 'single') {
+      fetchPackagePreview(pkgType);
+    }
+  };
+
+  const handleDateChange = (val: string) => {
+    setDate(val);
+    if (selectedPackageType !== 'single') {
+      invalidatePackagePreview();
+    }
+  };
+
+  const handleStartTimeChange = (val: string) => {
+    setStartTime(val);
+    if (selectedPackageType !== 'single') {
+      invalidatePackagePreview();
+    }
+  };
+
+  const handleEndTimeChange = (val: string) => {
+    setEndTime(val);
+    if (selectedPackageType !== 'single') {
+      invalidatePackagePreview();
+    }
+  };
+
+  const prevPackageRef = useRef<PackageType>('single');
+  useEffect(() => {
+    if (!visible || selectedPackageType === 'single') {
+      prevPackageRef.current = selectedPackageType;
+      return;
+    }
+
+    if (selectedPackageType !== prevPackageRef.current) {
+      prevPackageRef.current = selectedPackageType;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetchPackagePreview();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [visible, selectedPackageType, selectedCoachId, date, startTime, endTime, fetchPackagePreview]);
+
   const handleSelectSport = (sport: CoachDiscipline) => {
     if (sport === selectedSport) return;
     initialCoachIdRef.current = undefined;
@@ -251,6 +399,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     setSelectedCoachId('');
     setSelectedCoachLocation(null);
     setFormError(null);
+    if (selectedPackageType !== 'single') {
+      invalidatePackagePreview();
+    }
   };
 
   const handleSelectCoach = (coachId: string) => {
@@ -258,6 +409,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     setSelectedCoachId(coachId);
     setSelectedCoachLocation(null);
     setFormError(null);
+    if (selectedPackageType !== 'single') {
+      invalidatePackagePreview();
+    }
     const chosen = coaches.find((c) => c._id === coachId);
     if (chosen?.profile?.venueTypes && chosen.profile.venueTypes.length > 0) {
       const activeCoachVenues = chosen.profile.venueTypes.filter(
@@ -553,6 +707,26 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       return;
     }
 
+    // 8. Package options check
+    const isPreviewValid =
+      Boolean(packagePreview?.preview) &&
+      (packagePreview!.preview.isValid !== undefined
+        ? packagePreview!.preview.isValid
+        : packagePreview!.preview.sessionCount > 0 && !packagePreview!.preview.isInvalid) &&
+      !packagePreview!.preview.isInvalid &&
+      packagePreview!.preview.sessionCount > 0;
+
+    if (selectedPackageType !== 'single') {
+      if (isLoadingPackagePreview || !isPreviewValid) {
+        setFormError(
+          packagePreview?.preview?.invalidationReason ||
+            packagePreviewError ||
+            'Cannot submit package request: Please wait for a valid package schedule preview.'
+        );
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       const payload: any = {
@@ -565,6 +739,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
         trainingAddress: finalAddress.trim(),
         customerPhone: customerPhone.trim(),
       };
+      if (selectedPackageType !== 'single') {
+        payload.packageType = selectedPackageType;
+      }
       if (selectedVenue === 'customer_home' && finalCoords) {
         payload.coordinates = finalCoords;
         payload.locationCoordinates = finalCoords;
@@ -686,14 +863,49 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
               </ScrollView>
             )}
 
-            {/* 3. Date & Times */}
-            <Text style={styles.inputLabel}>3. DATE & TIME (24-HOUR)</Text>
+            {/* 3. Package Options */}
+            <Text style={styles.inputLabel}>3. BOOKING OPTION</Text>
+            <View style={styles.packageOptionContainer} testID="package-option-container">
+              {PACKAGE_OPTIONS.map((pkg) => {
+                const isSelected = pkg.id === selectedPackageType;
+                return (
+                  <TouchableOpacity
+                    key={pkg.id}
+                    style={[styles.packageOptionCard, isSelected && styles.packageOptionCardSelected]}
+                    onPress={() => handleSelectPackageType(pkg.id)}
+                    testID={`package-option-${pkg.id}`}
+                  >
+                    <Text
+                      style={[
+                        styles.packageOptionLabel,
+                        isSelected && styles.packageOptionLabelSelected,
+                      ]}
+                    >
+                      {pkg.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.packageOptionDesc,
+                        isSelected && styles.packageOptionDescSelected,
+                      ]}
+                    >
+                      {pkg.desc}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* 4. Date & Times */}
+            <Text style={styles.inputLabel}>4. DATE & TIME (24-HOUR)</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.fieldSubLabel}>Date (YYYY-MM-DD)</Text>
+              <Text style={styles.fieldSubLabel}>
+                {selectedPackageType !== 'single' ? 'Package Start Date (YYYY-MM-DD)' : 'Date (YYYY-MM-DD)'}
+              </Text>
               <TextInput
                 style={styles.textInput}
                 value={date}
-                onChangeText={setDate}
+                onChangeText={handleDateChange}
                 placeholder="2026-11-20"
                 placeholderTextColor={COLORS.textMuted}
                 autoCapitalize="none"
@@ -707,7 +919,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 <TextInput
                   style={styles.textInput}
                   value={startTime}
-                  onChangeText={setStartTime}
+                  onChangeText={handleStartTimeChange}
                   placeholder="09:00"
                   placeholderTextColor={COLORS.textMuted}
                   autoCapitalize="none"
@@ -719,7 +931,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 <TextInput
                   style={styles.textInput}
                   value={endTime}
-                  onChangeText={setEndTime}
+                  onChangeText={handleEndTimeChange}
                   placeholder="10:00"
                   placeholderTextColor={COLORS.textMuted}
                   autoCapitalize="none"
@@ -773,8 +985,126 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
               </View>
             )}
 
-            {/* 4. Venue Type */}
-            <Text style={styles.inputLabel}>4. VENUE TYPE</Text>
+            {/* Package Schedule & Pricing Feedback (if weekly or monthly package selected) */}
+            {selectedPackageType !== 'single' && (
+              <View style={styles.packagePreviewContainer} testID="package-preview-container">
+                {isLoadingPackagePreview ? (
+                  <View style={styles.packageLoadingRow} testID="package-preview-loading">
+                    <ActivityIndicator size="small" color={COLORS.navy} />
+                    <Text style={styles.packageLoadingText}>
+                      Generating package schedule & transparent pricing...
+                    </Text>
+                  </View>
+                ) : packagePreviewError ? (
+                  <View style={styles.packageErrorBox} testID="package-preview-error">
+                    <AlertCircle size={16} color="#DC2626" />
+                    <Text style={styles.packageErrorText}>{packagePreviewError}</Text>
+                  </View>
+                ) : packagePreview ? (
+                  <View style={styles.packagePreviewContent} testID="package-preview-content">
+                    {/* Schedule Header */}
+                    <View style={styles.packageHeaderBox}>
+                      <Text style={styles.packageScheduleTitle}>
+                        {selectedPackageType === 'weekly' ? '7-Day Package Schedule' : 'Monthly Package Schedule'}
+                      </Text>
+                      <Text style={styles.packageDateRangeText}>
+                        {packagePreview.preview.startDate} to {packagePreview.preview.endDate} ({packagePreview.preview.totalDaysInWindow} days)
+                      </Text>
+                    </View>
+
+                    {/* Sessions Found / Empty State */}
+                    {packagePreview.preview.sessionCount === 0 || packagePreview.preview.isInvalid ? (
+                      <View style={styles.zeroSessionsWarning} testID="package-zero-sessions-warning">
+                        <AlertCircle size={16} color="#D97706" />
+                        <Text style={styles.zeroSessionsText}>
+                          {packagePreview.preview.invalidationReason ||
+                            'No available sessions found in this duration window. Coach has no availability on these days. Please try another starting date or time.'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={styles.sessionCountBadgeRow}>
+                          <View style={styles.sessionCountBadge}>
+                            <Text style={styles.sessionCountBadgeText}>
+                              {packagePreview.preview.sessionCount} Valid Sessions Scheduled
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* List of Generated Session Dates */}
+                        <View style={styles.sessionDatesList} testID="package-session-dates-list">
+                          <Text style={styles.sessionDatesHeader}>Generated Session Dates:</Text>
+                          {packagePreview.preview.sessionDates.map((sDate, idx) => (
+                            <View key={sDate} style={styles.sessionDateRow} testID={`package-session-date-${idx}`}>
+                              <Calendar size={13} color={COLORS.navy} />
+                              <Text style={styles.sessionDateText}>
+                                Session {idx + 1}: {sDate} at {startTime}–{endTime}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+
+                        {/* Skipped dates notice if any */}
+                        {packagePreview.preview.skippedDates && packagePreview.preview.skippedDates.length > 0 && (
+                          <Text style={styles.skippedDatesNote}>
+                            ({packagePreview.preview.skippedDates.length} non-working day(s) skipped automatically)
+                          </Text>
+                        )}
+
+                        {/* Transparent Price Breakdown */}
+                        <View style={styles.packagePricingCard} testID="package-pricing-breakdown">
+                          <Text style={styles.packagePricingHeader}>PACKAGE PRICE BREAKDOWN</Text>
+
+                          <View style={styles.pricingRow}>
+                            <Text style={styles.pricingLabel}>
+                              Coaching Fee ({packagePreview.pricing.sessionCount} sessions @ ₹{packagePreview.pricing.perSessionFee}/session)
+                            </Text>
+                            <Text style={styles.pricingValue}>
+                              ₹{packagePreview.pricing.baseSessionFee.toFixed(2)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.pricingSubRow}>
+                            <Text style={styles.pricingSubLabel}>• Coach Allocation (80%)</Text>
+                            <Text style={styles.pricingSubValue}>
+                              ₹{packagePreview.pricing.coachAllocation.toFixed(2)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.pricingSubRow}>
+                            <Text style={styles.pricingSubLabel}>• Platform Fee (20%)</Text>
+                            <Text style={styles.pricingSubValue}>
+                              ₹{packagePreview.pricing.platformCommission.toFixed(2)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.pricingRow}>
+                            <Text style={styles.pricingLabel}>Taxes & Levies ({packagePreview.pricing.taxLabel})</Text>
+                            <Text style={styles.pricingValue}>
+                              ₹{packagePreview.pricing.taxAmount.toFixed(2)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.pricingDivider} />
+
+                          <View style={styles.pricingTotalRow}>
+                            <Text style={styles.pricingTotalLabel}>Total Package Payable</Text>
+                            <Text style={styles.pricingTotalValue} testID="package-total-payable">
+                              ₹{packagePreview.pricing.totalCustomerPayable.toFixed(2)}
+                            </Text>
+                          </View>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                ) : !selectedCoachId ? (
+                  <Text style={styles.subtleMuted}>Select a coach above to preview package schedule & pricing.</Text>
+                ) : null}
+              </View>
+            )}
+
+            {/* 5. Venue Type */}
+            <Text style={styles.inputLabel}>5. VENUE TYPE</Text>
             <View style={styles.rowWrap}>
               {offeredVenues.map((v) => {
                 const isSelected = v.id === selectedVenue;
@@ -793,8 +1123,8 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
               })}
             </View>
 
-            {/* 5. Address & Contact */}
-            <Text style={styles.inputLabel}>5. LOCATION & CONTACT</Text>
+            {/* 6. Address & Contact */}
+            <Text style={styles.inputLabel}>6. LOCATION & CONTACT</Text>
 
             {selectedVenue === 'customer_home' && (
               <View style={styles.venueSection}>
@@ -1070,7 +1400,18 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 variant="primary"
                 onPress={handleSubmit}
                 loading={isSubmitting}
-                disabled={isSubmitting}
+                disabled={
+                  isSubmitting ||
+                  isLoadingPackagePreview ||
+                  (selectedPackageType !== 'single' &&
+                    (!packagePreview ||
+                      !packagePreview.preview ||
+                      (packagePreview.preview.isValid !== undefined
+                        ? !packagePreview.preview.isValid
+                        : packagePreview.preview.sessionCount === 0 || packagePreview.preview.isInvalid) ||
+                      packagePreview.preview.isInvalid ||
+                      packagePreview.preview.sessionCount === 0))
+                }
                 style={styles.submitButton}
               />
             </View>
@@ -1606,5 +1947,228 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  packageOptionContainer: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    marginBottom: SPACING.sm,
+  },
+  packageOptionCard: {
+    flex: 1,
+    backgroundColor: COLORS.mist,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.xs,
+    borderRadius: RADII.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  packageOptionCardSelected: {
+    backgroundColor: COLORS.navy,
+    borderColor: COLORS.navy,
+  },
+  packageOptionLabel: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: '700',
+    fontSize: 12,
+    color: COLORS.navy,
+    textAlign: 'center',
+  },
+  packageOptionLabelSelected: {
+    color: COLORS.white,
+  },
+  packageOptionDesc: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  packageOptionDescSelected: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  packagePreviewContainer: {
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  packageLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    padding: SPACING.sm,
+    backgroundColor: COLORS.mist,
+    borderRadius: RADII.sm,
+  },
+  packageLoadingText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: COLORS.navy,
+  },
+  packageErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    padding: SPACING.sm,
+    borderRadius: RADII.sm,
+  },
+  packageErrorText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: '#991B1B',
+    flex: 1,
+  },
+  packagePreviewContent: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: SPACING.sm,
+    gap: SPACING.xs,
+  },
+  packageHeaderBox: {
+    marginBottom: 4,
+  },
+  packageScheduleTitle: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 13,
+    color: COLORS.navy,
+  },
+  packageDateRangeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  zeroSessionsWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FCD34D',
+    borderWidth: 1,
+    padding: SPACING.sm,
+    borderRadius: RADII.sm,
+  },
+  zeroSessionsText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 12,
+    color: '#92400E',
+    flex: 1,
+  },
+  sessionCountBadgeRow: {
+    flexDirection: 'row',
+    marginVertical: 4,
+  },
+  sessionCountBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: RADII.full,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  sessionCountBadgeText: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: '700',
+    fontSize: 11,
+    color: '#3730A3',
+  },
+  sessionDatesList: {
+    marginVertical: 4,
+    gap: 3,
+  },
+  sessionDatesHeader: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: '600',
+    fontSize: 11,
+    color: COLORS.navy,
+  },
+  sessionDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sessionDateText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  skippedDatesNote: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+  },
+  packagePricingCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: SPACING.sm,
+    marginTop: 6,
+  },
+  packagePricingHeader: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: '700',
+    fontSize: 11,
+    color: COLORS.navy,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  pricingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 2,
+  },
+  pricingLabel: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
+    color: COLORS.navy,
+  },
+  pricingValue: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: '600',
+    fontSize: 11,
+    color: COLORS.navy,
+  },
+  pricingSubRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 1,
+    paddingLeft: SPACING.xs,
+  },
+  pricingSubLabel: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    color: COLORS.textSecondary,
+  },
+  pricingSubValue: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    color: COLORS.textSecondary,
+  },
+  pricingDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 6,
+  },
+  pricingTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pricingTotalLabel: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 12,
+    color: COLORS.navy,
+  },
+  pricingTotalValue: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 13,
+    color: COLORS.navy,
   },
 });

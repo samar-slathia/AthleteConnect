@@ -18,6 +18,46 @@ export type BookingStatus =
 export type PaymentStatus = 'unpaid' | 'paid' | 'partially_refunded' | 'refunded';
 export type RefundStatus = 'none' | 'pending' | 'partially_refunded' | 'processed' | 'failed';
 
+export const PACKAGE_TYPES = ['single', 'weekly', 'monthly'] as const;
+export type PackageType = (typeof PACKAGE_TYPES)[number];
+
+export interface PackagePreviewSchedule {
+  packageType: PackageType;
+  startDate: string;
+  endDate: string;
+  totalDaysInWindow: number;
+  sessionDates: string[];
+  sessionCount: number;
+  skippedDates: Array<{
+    date: string;
+    reason: 'outside_working_hours' | 'blackout_date' | 'slot_conflict';
+    message: string;
+  }>;
+  isValid: boolean;
+  isInvalid: boolean;
+  invalidationReason?: string;
+}
+
+export interface PackagePricingBreakdown {
+  hourlyRate: number;
+  durationMinutes: number;
+  sessionCount: number;
+  perSessionFee: number;
+  baseSessionFee: number;
+  platformCommission: number;
+  coachAllocation: number;
+  taxRatePercentage: number;
+  taxAmount: number;
+  totalCustomerPayable: number;
+  amountInPaise: number;
+  taxLabel: string;
+}
+
+export interface PackagePreviewResponse {
+  preview: PackagePreviewSchedule;
+  pricing: PackagePricingBreakdown;
+}
+
 export interface CoachDiscoveryProfile {
   bio: string;
   disciplines: CoachDiscipline[];
@@ -116,6 +156,13 @@ export interface BookingItem {
   completedAt?: string;
   isRated?: boolean;
   review?: BookingReview | null;
+  packageType?: PackageType;
+  packageGroupId?: string;
+  packageSessionIndex?: number;
+  packageSessionCount?: number;
+  packageStartDate?: string;
+  packageEndDate?: string;
+  packageTotalAmount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -129,6 +176,7 @@ export interface CreateBookingPayload {
   venueType: VenueType;
   trainingAddress: string;
   customerPhone: string;
+  packageType?: PackageType;
   locationCoordinates?: BookingCoordinates;
   coordinates?: BookingCoordinates;
 }
@@ -778,5 +826,50 @@ export function getKolkataDateString(date: Date = new Date()): string {
 export function getKolkataTomorrowDateString(fromDate: Date = new Date()): string {
   const tomorrow = new Date(fromDate.getTime() + 24 * 60 * 60 * 1000);
   return getKolkataDateString(tomorrow);
+}
+
+/**
+ * Fetch package scheduling preview and transparent pricing breakdown.
+ * GET /api/bookings/package-preview
+ */
+export async function getPackagePreview(
+  params: {
+    coachId: string;
+    startDate: string;
+    startTime: string;
+    endTime: string;
+    packageType: PackageType;
+  },
+  token: string
+): Promise<PackagePreviewResponse> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  const query = new URLSearchParams({
+    coachId: params.coachId,
+    startDate: params.startDate,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    packageType: params.packageType,
+  });
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/bookings/package-preview?${query.toString()}`;
+
+  const response = await safeFetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorMsg = await parseResponseError(response, token);
+    throw new AuthApiError(errorMsg, response.status);
+  }
+
+  return response.json();
 }
 

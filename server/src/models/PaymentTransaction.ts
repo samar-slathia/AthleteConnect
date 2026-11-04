@@ -37,6 +37,9 @@ export interface IRefundItem {
 
 export interface IPaymentTransaction {
   bookingId: mongoose.Types.ObjectId;
+  packageGroupId?: mongoose.Types.ObjectId;
+  packageType?: string;
+  sessionCount?: number;
   customerId: mongoose.Types.ObjectId;
   coachId: mongoose.Types.ObjectId;
   currency: string;
@@ -81,6 +84,19 @@ const PaymentTransactionSchema = new Schema<IPaymentTransactionDocument>(
       ref: 'Booking',
       required: [true, 'Booking ID is required.'],
       index: true,
+    },
+    packageGroupId: {
+      type: Schema.Types.ObjectId,
+      index: true,
+    },
+    packageType: {
+      type: String,
+      default: 'single',
+    },
+    sessionCount: {
+      type: Number,
+      min: 1,
+      default: 1,
     },
     customerId: {
       type: Schema.Types.ObjectId,
@@ -272,6 +288,7 @@ const PaymentTransactionSchema = new Schema<IPaymentTransactionDocument>(
 // Compound indexes for fast order lookups and idempotency
 PaymentTransactionSchema.index({ bookingId: 1, status: 1 });
 PaymentTransactionSchema.index({ customerId: 1, createdAt: -1 });
+PaymentTransactionSchema.index({ packageGroupId: 1, status: 1 });
 
 export const PaymentTransaction: Model<IPaymentTransactionDocument> =
   (mongoose.models.PaymentTransaction as Model<IPaymentTransactionDocument>) ||
