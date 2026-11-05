@@ -12,7 +12,6 @@ import {
   Timer,
   CheckCircle2,
   CheckCircle,
-  CreditCard,
 } from 'lucide-react-native';
 import { BookingItem } from '../../../services/bookingApi';
 import { openInGoogleMaps } from '../../../services/locationService';
@@ -260,27 +259,6 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
         </Text>
       ) : null}
 
-      {/* Unpaid Payment Banner for Accepted Bookings */}
-      {booking.status === 'accepted' && booking.paymentStatus === 'unpaid' ? (
-        <View style={styles.paymentNoticeBox} testID={`unpaid-banner-${booking._id}`}>
-          <View style={styles.paymentNoticeLeft}>
-            <CreditCard size={14} color="#B45309" />
-            <Text style={styles.paymentNoticeText}>Prepaid payment required to confirm session</Text>
-          </View>
-          {onPay ? (
-            <TouchableOpacity
-              style={styles.payNowSmallBtn}
-              onPress={() => onPay(booking)}
-              accessibilityRole="button"
-              accessibilityLabel="Prepaid Pay Now"
-              testID={`button-pay-notice-${booking._id}`}
-            >
-              <Text style={styles.payNowSmallBtnText}>Prepaid — Pay Now</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : null}
-
       {/* Refund status notice */}
       {booking.refundStatus === 'pending' ? (
         <View style={styles.noteBox} testID={`refund-pending-notice-${booking._id}`}>
@@ -344,16 +322,20 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
       {showActionRow ? (
         <View style={styles.actionRow}>
           {canPay ? (
-            <TouchableOpacity
-              style={styles.payButton}
-              onPress={() => onPay && onPay(booking)}
-              accessibilityRole="button"
-              accessibilityLabel={`Prepaid pay for session with ${booking.coachName || 'coach'}`}
-              testID={`button-pay-${booking._id}`}
-            >
-              <CreditCard size={13} color={COLORS.navy} />
-              <Text style={styles.payButtonText}>Prepaid — Pay Now</Text>
-            </TouchableOpacity>
+            <View style={styles.payCtaContainer}>
+              <View style={styles.recommendedBadge} testID={`recommended-badge-${booking._id}`}>
+                <Text style={styles.recommendedBadgeText}>Recommended</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.payButton}
+                onPress={() => onPay && onPay(booking)}
+                accessibilityRole="button"
+                accessibilityLabel={`Pay for session with ${booking.coachName || 'coach'}`}
+                testID={`button-pay-${booking._id}`}
+              >
+                <Text style={styles.payButtonText}>Pay Now</Text>
+              </TouchableOpacity>
+            </View>
           ) : null}
 
           {canRate ? (
@@ -583,12 +565,32 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    flexWrap: 'wrap',
     gap: SPACING.sm,
     marginTop: SPACING.sm,
     paddingTop: SPACING.xs,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+  },
+  payCtaContainer: {
+    alignItems: 'center',
+    gap: 3,
+  },
+  recommendedBadge: {
+    backgroundColor: '#FFF7ED',
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: RADII.full,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.35)',
+  },
+  recommendedBadgeText: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#C2410C',
+    letterSpacing: 0.3,
   },
   rateButton: {
     flexDirection: 'row',
@@ -606,13 +608,12 @@ const styles = StyleSheet.create({
     color: COLORS.navy,
   },
   payButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     backgroundColor: COLORS.orange,
     borderRadius: RADII.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   payButtonText: {
     ...TYPOGRAPHY.caption,
@@ -657,43 +658,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.success,
     letterSpacing: 0.5,
-  },
-  paymentNoticeBox: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFBEB',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 7,
-    borderRadius: RADII.sm,
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    marginTop: 6,
-  },
-  paymentNoticeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  paymentNoticeText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11.5,
-    fontWeight: '600',
-    color: '#92400E',
-    flex: 1,
-  },
-  payNowSmallBtn: {
-    backgroundColor: COLORS.navy,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: RADII.sm,
-  },
-  payNowSmallBtnText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.white,
   },
   ratedBadge: {
     flexDirection: 'row',

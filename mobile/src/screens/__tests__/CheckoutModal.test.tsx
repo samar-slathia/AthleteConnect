@@ -551,8 +551,8 @@ describe('Phase 1B.2B: Genuine Razorpay Standard Checkout & Prepaid UPI Integrat
     });
   });
 
-  describe('CustomerBookingCard Prepaid Labeling & Integration', () => {
-    it('shows "Prepaid — Pay Now" button and banner for accepted unpaid booking', () => {
+  describe('CustomerBookingCard Payment CTA & Integration', () => {
+    it('shows prominent "Pay Now" button with subtle Recommended badge and no warning banner for accepted unpaid booking', () => {
       const mockOnPay = vi.fn();
       const tree = CustomerBookingCard({
         booking: mockBooking,
@@ -561,11 +561,15 @@ describe('Phase 1B.2B: Genuine Razorpay Standard Checkout & Prepaid UPI Integrat
 
       const payBtn = findByTestId(tree, `button-pay-${mockBooking._id}`);
       expect(payBtn).not.toBeNull();
-      expect(extractText(payBtn)).toContain('Prepaid — Pay Now');
+      expect(extractText(payBtn)).toContain('Pay Now');
+      expect(extractText(payBtn)).not.toContain('Prepaid');
+
+      const recommendedBadge = findByTestId(tree, `recommended-badge-${mockBooking._id}`);
+      expect(recommendedBadge).not.toBeNull();
+      expect(extractText(recommendedBadge)).toContain('Recommended');
 
       const unpaidBanner = findByTestId(tree, `unpaid-banner-${mockBooking._id}`);
-      expect(unpaidBanner).not.toBeNull();
-      expect(extractText(unpaidBanner)).toContain('Prepaid payment required to confirm session');
+      expect(unpaidBanner).toBeNull();
 
       payBtn.props.onPress();
       expect(mockOnPay).toHaveBeenCalledWith(mockBooking);
