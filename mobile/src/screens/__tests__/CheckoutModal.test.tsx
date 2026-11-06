@@ -575,6 +575,41 @@ describe('Phase 1B.2B: Genuine Razorpay Standard Checkout & Prepaid UPI Integrat
       expect(mockOnPay).toHaveBeenCalledWith(mockBooking);
     });
 
+    it('renders all four actions (Pay Now, Maps, Chat, Cancel Booking) in a single row without wrapping', () => {
+      const fullBooking: BookingItem = {
+        ...mockBooking,
+        trainingAddress: '123 Main Road, Bangalore',
+        coordinates: { latitude: 12.9716, longitude: 77.5946 },
+      };
+      const mockOnPay = vi.fn();
+      const mockOnCancel = vi.fn();
+      const mockOnOpenChat = vi.fn();
+
+      const tree = CustomerBookingCard({
+        booking: fullBooking,
+        onPay: mockOnPay,
+        onCancel: mockOnCancel,
+        onOpenChat: mockOnOpenChat,
+      });
+
+      const payBtn = findByTestId(tree, `button-pay-${fullBooking._id}`);
+      const mapsBtn = findByTestId(tree, `button-maps-${fullBooking._id}`);
+      const chatBtn = findByTestId(tree, `button-chat-${fullBooking._id}`);
+      const cancelBtn = findByTestId(tree, `button-cancel-${fullBooking._id}`);
+      const recommendedBadge = findByTestId(tree, `recommended-badge-${fullBooking._id}`);
+
+      expect(payBtn).not.toBeNull();
+      expect(mapsBtn).not.toBeNull();
+      expect(chatBtn).not.toBeNull();
+      expect(cancelBtn).not.toBeNull();
+      expect(recommendedBadge).not.toBeNull();
+
+      expect(extractText(payBtn).trim()).toBe('Pay Now');
+      expect(extractText(mapsBtn).trim()).toBe('Maps');
+      expect(extractText(chatBtn).trim()).toBe('Chat');
+      expect(extractText(cancelBtn).trim()).toBe('Cancel Booking');
+    });
+
     it('shows PAID badge and hides pay action when booking is paid', () => {
       const paidBooking: BookingItem = {
         ...mockBooking,
@@ -717,6 +752,201 @@ describe('Phase 1B.2B: Genuine Razorpay Standard Checkout & Prepaid UPI Integrat
       expect(text).toContain('Sessions');
       expect(text).toContain('Package Fee (3 sessions @ ₹1200/session)');
       expect(text).toContain('₹3600.00');
+
+      cleanup();
+    });
+
+    it('renders payment mode selection tabs with "Pay on this phone" as default', async () => {
+      vi.spyOn(paymentApi, 'createPaymentOrder').mockResolvedValue(mockOrderResponse);
+
+      const { render, cleanup } = createHarness(
+        React.createElement(CheckoutModal, {
+          visible: true,
+          onClose: vi.fn(),
+          booking: mockBooking,
+          token: 'mock_token',
+          onSuccess: vi.fn(),
+        })
+      );
+
+      await flushPromises();
+      const tree = render();
+
+      const standardTab = findByTestId(tree, 'tab-pay-standard');
+      const qrTab = findByTestId(tree, 'tab-pay-qr');
+
+      expect(standardTab).not.toBeNull();
+      expect(qrTab).not.toBeNull();
+      expect(extractText(standardTab)).toContain('Pay on this phone');
+      expect(extractText(qrTab)).toContain('Pay via QR (other phone)');
+
+      // Pricing breakdown is visible by default
+      const breakdown = findByTestId(tree, 'pricing-breakdown-card');
+      expect(breakdown).not.toBeNull();
+
+      cleanup();
+    });
+
+    it('switches to QR payment mode and renders genuine Razorpay QR image', async () => {
+      vi.spyOn(paymentApi, 'createPaymentOrder').mockResolvedValue(mockOrderResponse);
+      const mockQrResponse: paymentApi.PaymentQrResponse = {
+        qrId: 'qr_test_genuine_123',
+        imageUrl: 'https://api.razorpay.com/v1/payments/qr_codes/qr_test_genuine_123/image',
+        amount: 1500,
+        amountInPaise: 150000,
+        currency: 'INR',
+        closeBy: Math.floor(Date.now() / 1000) + 900,
+        breakdown: mockOrderResponse.breakdown,
+        message: 'Payment QR created successfully.',
+      };
+      const createQrSpy = vi.spyOn(paymentApi, 'createPaymentQr').mockResolvedValue(mockQrResponse);
+
+      const { render, cleanup } = createHarness(
+        React.createElement(CheckoutModal, {
+          visible: true,
+          onClose: vi.fn(),
+          booking: mockBooking,
+          token: 'mock_token',
+          onSuccess: vi.fn(),
+        })
+      );
+
+      await flushPromises();
+      let tree = render();
+
+      // Tap QR Tab
+      const qrTab = findByTestId(tree, 'tab-pay-qr');
+      qrTab.props.onPress();
+
+      await flushPromises();
+      tree = render();
+
+      expect(createQrSpy).toHaveBeenCalledWith('booking_123', 'mock_token');
+
+      // Verify QR image and details
+      const qrImage = findByTestId(tree, 'razorpay-qr-image');
+      expect(qrImage).not.toBeNull();
+      expect(qrImage.props.source).toEqual({
+        uri: 'https://api.razorpay.com/v1/payments/qr_codes/qr_test_genuine_123/image',
+      });
+
+      const amountText = findByTestId(tree, 'qr-amount-text');
+      expect(extractText(amountText)).toContain('1500.00');
+
+      const instruction = findByTestId(tree, 'qr-instruction-text');
+      expect(extractText(instruction)).toContain('Google Pay, PhonePe, Paytm, BHIM');
+
+      const countdown = findByTestId(tree, 'qr-countdown-timer');
+      expect(countdown).not.toBeNull();
+      expect(extractText(countdown)).toContain('Expires in');
+
+      cleanup();
+    });
+
+    it('handles Razorpay QR not activated error and provides smooth fallback to phone checkout', async () => {
+      vi.spyOn(paymentApi, 'createPaymentOrder').mockResolvedValue(mockOrderResponse);
+      vi.spyOn(paymentApi, 'createPaymentQr').mockRejectedValue(
+        new Error(
+          'Razorpay Dynamic UPI QR payments are not enabled for this account. Account activation with Razorpay is required.'
+        )
+      );
+
+      const { render, cleanup } = createHarness(
+        React.createElement(CheckoutModal, {
+          visible: true,
+          onClose: vi.fn(),
+          booking: mockBooking,
+          token: 'mock_token',
+          onSuccess: vi.fn(),
+        })
+      );
+
+      await flushPromises();
+      let tree = render();
+
+      // Switch to QR tab
+      const qrTab = findByTestId(tree, 'tab-pay-qr');
+      qrTab.props.onPress();
+
+      await flushPromises();
+      tree = render();
+
+      const activationBanner = findByTestId(tree, 'qr-activation-error-banner');
+      expect(activationBanner).not.toBeNull();
+      expect(extractText(activationBanner)).toContain('Dynamic UPI QR Feature Not Activated');
+      expect(extractText(activationBanner)).toContain(
+        'Razorpay Dynamic UPI QR payments are not enabled for this account.'
+      );
+
+      // Tap fallback button to switch back to phone checkout
+      const fallbackBtn = findByTestId(tree, 'button-switch-to-standard');
+      expect(fallbackBtn).not.toBeNull();
+      fallbackBtn.props.onPress();
+
+      await flushPromises();
+      tree = render();
+
+      // Standard checkout card is back
+      const breakdown = findByTestId(tree, 'pricing-breakdown-card');
+      expect(breakdown).not.toBeNull();
+
+      cleanup();
+    });
+
+    it('manually checks QR payment status and confirms payment when captured', async () => {
+      vi.spyOn(paymentApi, 'createPaymentOrder').mockResolvedValue(mockOrderResponse);
+      const mockQrResponse: paymentApi.PaymentQrResponse = {
+        qrId: 'qr_test_genuine_123',
+        imageUrl: 'https://api.razorpay.com/v1/payments/qr_codes/qr_test_genuine_123/image',
+        amount: 1500,
+        amountInPaise: 150000,
+        currency: 'INR',
+        closeBy: Math.floor(Date.now() / 1000) + 900,
+        breakdown: mockOrderResponse.breakdown,
+      };
+      vi.spyOn(paymentApi, 'createPaymentQr').mockResolvedValue(mockQrResponse);
+      const getQrStatusSpy = vi.spyOn(paymentApi, 'getQrPaymentStatus').mockResolvedValue({
+        isPaid: true,
+        isExpired: false,
+        paymentStatus: 'paid',
+        status: 'captured',
+        paymentId: 'pay_qr_captured_999',
+      });
+
+      const onSuccessMock = vi.fn();
+      const { render, cleanup } = createHarness(
+        React.createElement(CheckoutModal, {
+          visible: true,
+          onClose: vi.fn(),
+          booking: mockBooking,
+          token: 'mock_token',
+          onSuccess: onSuccessMock,
+        })
+      );
+
+      await flushPromises();
+      let tree = render();
+
+      // Switch to QR mode
+      const qrTab = findByTestId(tree, 'tab-pay-qr');
+      qrTab.props.onPress();
+
+      await flushPromises();
+      tree = render();
+
+      // Check payment status button
+      const checkStatusBtn = findByTestId(tree, 'button-check-qr-status');
+      expect(checkStatusBtn).not.toBeNull();
+      checkStatusBtn.props.onPress();
+
+      await flushPromises();
+      tree = render();
+
+      expect(getQrStatusSpy).toHaveBeenCalledWith('booking_123', 'mock_token', { reconcile: true });
+
+      const successBanner = findByTestId(tree, 'payment-success-banner');
+      expect(successBanner).not.toBeNull();
+      expect(extractText(successBanner)).toContain('Payment confirmed');
 
       cleanup();
     });

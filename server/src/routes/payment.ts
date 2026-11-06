@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import {
   createPaymentOrder,
+  createPaymentQr,
+  getQrPaymentStatus,
+  closePaymentQr,
   verifyPaymentSignature,
   handlePaymentWebhook,
   getBookingPaymentStatus,
@@ -16,6 +19,30 @@ paymentRouter.post(
   authenticate,
   requireRole('parent', 'individual'),
   createPaymentOrder
+);
+
+// Create Razorpay Dynamic UPI QR (Customer only)
+paymentRouter.post(
+  '/create-qr',
+  authenticate,
+  requireRole('parent', 'individual'),
+  createPaymentQr
+);
+
+// Get QR Payment Status and Reconcile with Gateway (Customer only)
+paymentRouter.get(
+  '/qr-status/:bookingId',
+  authenticate,
+  requireRole('parent', 'individual'),
+  getQrPaymentStatus
+);
+
+// Close Active QR Payment (Customer / Admin)
+paymentRouter.post(
+  '/close-qr',
+  authenticate,
+  requireRole('parent', 'individual', 'admin'),
+  closePaymentQr
 );
 
 // Verify Razorpay Payment Signature (Customer only)

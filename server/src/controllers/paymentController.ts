@@ -8,12 +8,17 @@ import { config } from '../config/env';
 import {
   calculatePaymentBreakdown,
   createRazorpayOrder,
+  createRazorpayQrCode,
+  fetchRazorpayQrPayments,
+  closeRazorpayQrCode,
   verifyRazorpaySignature,
   verifyRazorpayWebhookSignature,
   fetchRazorpayPayment,
   fetchRazorpayPaymentRefunds,
   RazorpayPaymentEntity,
   RazorpayRefundEntity,
+  RazorpayQrResult,
+  CreateQrParams,
 } from '../services/razorpayService';
 
 /**
@@ -171,33 +176,44 @@ export async function createPaymentOrder(
     });
 
     if (existingTx) {
-      // Reuse existing active order to prevent duplicates
-      return res.status(200).json({
-        orderId: existingTx.razorpayOrderId,
-        amount: existingTx.totalCustomerPayable,
-        amountInPaise: existingTx.amountInPaise,
-        currency: existingTx.currency,
-        keyId: config.RAZORPAY_KEY_ID,
-        ...(booking.packageGroupId ? {
-          packageType: existingTx.packageType || booking.packageType || 'single',
-          sessionCount: existingTx.sessionCount || sessionCount,
-        } : {}),
-        breakdown: {
-          coachingFee: existingTx.baseSessionFee,
+      if ((!existingTx.paymentMethod || existingTx.paymentMethod === 'standard') && existingTx.razorpayOrderId) {
+        // Reuse existing active standard order to prevent duplicates
+        return res.status(200).json({
+          orderId: existingTx.razorpayOrderId,
+          amount: existingTx.totalCustomerPayable,
+          amountInPaise: existingTx.amountInPaise,
+          currency: existingTx.currency,
+          keyId: config.RAZORPAY_KEY_ID,
           ...(booking.packageGroupId ? {
+            packageType: existingTx.packageType || booking.packageType || 'single',
             sessionCount: existingTx.sessionCount || sessionCount,
           } : {}),
-          taxAmount: existingTx.taxAmount,
-          taxRatePercentage: existingTx.taxRatePercentage,
-          taxLabel:
-            existingTx.taxRatePercentage > 0
-              ? `Demonstration Tax Estimate (${existingTx.taxRatePercentage}% - Sandbox Test Mode)`
-              : 'Taxes & Levies (0% Sandbox Mode)',
-          totalPayable: existingTx.totalCustomerPayable,
-        },
-        paymentDueAt: booking.paymentDueAt,
-        message: 'Active payment order retrieved.',
-      });
+          breakdown: {
+            coachingFee: existingTx.baseSessionFee,
+            ...(booking.packageGroupId ? {
+              sessionCount: existingTx.sessionCount || sessionCount,
+            } : {}),
+            taxAmount: existingTx.taxAmount,
+            taxRatePercentage: existingTx.taxRatePercentage,
+            taxLabel:
+              existingTx.taxRatePercentage > 0
+                ? `Demonstration Tax Estimate (${existingTx.taxRatePercentage}% - Sandbox Test Mode)`
+                : 'Taxes & Levies (0% Sandbox Mode)',
+            totalPayable: existingTx.totalCustomerPayable,
+          },
+          paymentDueAt: booking.paymentDueAt,
+          message: 'Active payment order retrieved.',
+        });
+      } else if (existingTx.paymentMethod === 'qr' && existingTx.razorpayQrId) {
+        // Active QR transaction exists: close it so the customer cannot pay through both methods concurrently
+        try {
+          await closeRazorpayQrCode(existingTx.razorpayQrId);
+        } catch {}
+        await PaymentTransaction.updateOne(
+          { _id: existingTx._id, status: 'created' },
+          { $set: { status: 'failed', failureReason: 'Superseded by standard checkout' } }
+        );
+      }
     }
 
     // Resolve coach hourly rate
@@ -306,6 +322,646 @@ export async function createPaymentOrder(
       },
       paymentDueAt: booking.paymentDueAt,
       message: 'Payment order created successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Create a Razorpay Dynamic UPI QR code for an accepted, unpaid booking.
+ * POST /api/payments/create-qr
+ * Protected: 'parent', 'individual'.
+ */
+export async function createPaymentQr(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { bookingId } = req.body || {};
+    if (!bookingId || typeof bookingId !== 'string' || !mongoose.Types.ObjectId.isValid(bookingId.trim())) {
+      return res.status(400).json({ error: 'Valid bookingId is required.' });
+    }
+
+    const cleanBookingId = bookingId.trim();
+    const booking = await Booking.findById(cleanBookingId);
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+
+    // Ownership check: Customer who created the booking only
+    const customerIdStr = (booking.customerId?._id || booking.customerId).toString();
+    if (customerIdStr !== req.user.id) {
+      return res.status(403).json({
+        error: 'Access forbidden. You can only create payment QR codes for your own bookings.',
+      });
+    }
+
+    let sessionCount = 1;
+    let packageBookings: any[] = [];
+    if (booking.packageGroupId) {
+      packageBookings = await Booking.find({ packageGroupId: booking.packageGroupId }).sort({
+        packageSessionIndex: 1,
+      });
+      sessionCount = packageBookings.length || 1;
+
+      // Lifecycle check for package: all sessions must be accepted
+      const hasPending = packageBookings.some((b) => b.status === 'pending');
+      if (hasPending) {
+        return res.status(400).json({
+          error: 'Cannot initiate payment for a pending package. Please wait for the coach to accept your request.',
+        });
+      }
+
+      const invalidStatusBooking = packageBookings.find((b) => b.status !== 'accepted');
+      if (invalidStatusBooking) {
+        return res.status(400).json({
+          error: `Cannot initiate payment for package with status "${invalidStatusBooking.status}". Only accepted packages can be paid.`,
+        });
+      }
+
+      const alreadyPaid = packageBookings.every(
+        (b) => b.paymentStatus === 'paid' || b.paymentStatus === 'partially_refunded'
+      );
+      if (alreadyPaid) {
+        return res.status(400).json({
+          error: 'This package has already been paid.',
+        });
+      }
+
+      const allRefunded = packageBookings.every((b) => b.paymentStatus === 'refunded');
+      if (allRefunded) {
+        return res.status(400).json({
+          error: 'This package was refunded. Please request a new package.',
+          code: 'BOOKING_REFUNDED',
+        });
+      }
+    } else {
+      // Lifecycle check: Single booking must be accepted
+      if (booking.status === 'pending') {
+        return res.status(400).json({
+          error: 'Cannot initiate payment for a pending booking. Please wait for the coach to accept your request.',
+        });
+      }
+
+      if (booking.status !== 'accepted') {
+        return res.status(400).json({
+          error: `Cannot initiate payment for booking with status "${booking.status}". Only accepted bookings can be paid.`,
+        });
+      }
+
+      // Payment state check
+      if (booking.paymentStatus === 'paid' || booking.paymentStatus === 'partially_refunded') {
+        return res.status(400).json({
+          error: 'This booking has already been paid.',
+        });
+      }
+
+      if (booking.paymentStatus === 'refunded') {
+        return res.status(400).json({
+          error: 'This booking was refunded. Please request a new booking session.',
+          code: 'BOOKING_REFUNDED',
+        });
+      }
+    }
+
+    // Payment window expiration check
+    if (booking.paymentDueAt && new Date() > new Date(booking.paymentDueAt)) {
+      if (booking.packageGroupId) {
+        await Booking.updateMany(
+          {
+            packageGroupId: booking.packageGroupId,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
+          },
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      } else {
+        await Booking.updateOne(
+          {
+            _id: booking._id,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
+          },
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      }
+
+      return res.status(400).json({
+        error: 'The payment window for this booking has expired. The booking has been cancelled.',
+        code: 'PAYMENT_EXPIRED',
+      });
+    }
+
+    // Check for existing active (unexpired) transaction for this booking / package
+    const existingTx = await PaymentTransaction.findOne({
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
+      status: 'created',
+      orderExpiresAt: { $gt: new Date() },
+    });
+
+    if (existingTx) {
+      if (existingTx.paymentMethod === 'qr' && existingTx.razorpayQrId && existingTx.qrImageUrl) {
+        return res.status(200).json({
+          qrId: existingTx.razorpayQrId,
+          imageUrl: existingTx.qrImageUrl,
+          amount: existingTx.totalCustomerPayable,
+          amountInPaise: existingTx.amountInPaise,
+          currency: existingTx.currency,
+          closeBy: existingTx.qrCloseBy,
+          expiresAt: existingTx.orderExpiresAt,
+          ...(booking.packageGroupId ? {
+            packageType: existingTx.packageType || booking.packageType || 'single',
+            sessionCount: existingTx.sessionCount || sessionCount,
+          } : {}),
+          breakdown: {
+            coachingFee: existingTx.baseSessionFee,
+            ...(booking.packageGroupId ? {
+              sessionCount: existingTx.sessionCount || sessionCount,
+            } : {}),
+            taxAmount: existingTx.taxAmount,
+            taxRatePercentage: existingTx.taxRatePercentage,
+            taxLabel:
+              existingTx.taxRatePercentage > 0
+                ? `Demonstration Tax Estimate (${existingTx.taxRatePercentage}% - Sandbox Test Mode)`
+                : 'Taxes & Levies (0% Sandbox Mode)',
+            totalPayable: existingTx.totalCustomerPayable,
+          },
+          paymentDueAt: booking.paymentDueAt,
+          message: 'Active payment QR retrieved.',
+        });
+      } else if (!existingTx.paymentMethod || existingTx.paymentMethod === 'standard') {
+        // Active standard order exists: mark it failed so customer cannot pay both concurrently
+        await PaymentTransaction.updateOne(
+          { _id: existingTx._id, status: 'created' },
+          { $set: { status: 'failed', failureReason: 'Superseded by QR payment' } }
+        );
+      }
+    }
+
+    // Resolve coach hourly rate
+    let hourlyRate = booking.hourlyRateSnapshot;
+    if (typeof hourlyRate !== 'number' || hourlyRate <= 0) {
+      const coachProfile = await CoachProfile.findOne({ userId: booking.coachId });
+      hourlyRate = coachProfile?.hourlyRate || 1000;
+    }
+
+    const durationMinutes = booking.durationMinutes || 60;
+    const breakdown = calculatePaymentBreakdown({
+      hourlyRate,
+      durationMinutes,
+      sessionCount,
+      taxRatePercentage: config.TAX_RATE_PERCENTAGE,
+    });
+
+    // Enforce Razorpay minimum lifetime constraint (>= 120s) and cap QR expiry to at most 2 hours
+    // (7200 seconds) or the booking payment deadline, whichever is earlier.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const minLifetimeSeconds = 120; // 2 minutes (Razorpay minimum required lifetime)
+    const maxLifetimeSeconds = 2 * 60 * 60; // 2 hours maximum lifetime
+    let closeBySeconds = nowSeconds + maxLifetimeSeconds;
+
+    if (booking.paymentDueAt) {
+      const dueSeconds = Math.floor(new Date(booking.paymentDueAt).getTime() / 1000);
+      const remainingLifetime = dueSeconds - nowSeconds;
+      if (remainingLifetime < minLifetimeSeconds) {
+        return res.status(400).json({
+          error:
+            'Insufficient time remaining before payment deadline to generate dynamic QR (minimum 2 minutes required). Please use direct phone payment.',
+          code: 'INSUFFICIENT_TIME_FOR_QR',
+        });
+      }
+      // Never exceed paymentDueAt, and never exceed two hours from QR creation
+      closeBySeconds = Math.min(nowSeconds + maxLifetimeSeconds, dueSeconds);
+    }
+
+    let qrResult: RazorpayQrResult;
+    try {
+      qrResult = await createRazorpayQrCode({
+        amountInPaise: breakdown.amountInPaise,
+        name: 'AthleteConnect Booking',
+        description: booking.packageGroupId
+          ? `AthleteConnect ${booking.packageType || 'Package'} (${sessionCount} sessions)`
+          : 'AthleteConnect Coaching Session',
+        closeBy: closeBySeconds,
+        notes: {
+          bookingId: booking._id.toString(),
+          packageGroupId: booking.packageGroupId ? booking.packageGroupId.toString() : '',
+          packageType: booking.packageType || 'single',
+          sessionCount: String(sessionCount),
+          customerId: req.user.id,
+          coachId: booking.coachId.toString(),
+        },
+      });
+    } catch (qrErr: any) {
+      if (qrErr.code === 'RAZORPAY_QR_NOT_ACTIVATED') {
+        return res.status(400).json({
+          error:
+            'Razorpay Dynamic UPI QR payments are not enabled for this account. Account activation with Razorpay is required.',
+          code: 'RAZORPAY_QR_NOT_ACTIVATED',
+          detail: qrErr.gatewayError,
+        });
+      }
+      return res.status(502).json({
+        error: `Payment gateway QR initialization failed: ${qrErr?.message || 'Gateway error'}`,
+        code: 'GATEWAY_ERROR',
+        detail: qrErr?.message,
+      });
+    }
+
+    const authoritativeCloseBy = qrResult.close_by || closeBySeconds;
+    const qrExpiresAt = new Date(authoritativeCloseBy * 1000);
+
+    const transaction = new PaymentTransaction({
+      bookingId: booking._id,
+      packageGroupId: booking.packageGroupId,
+      packageType: booking.packageType || 'single',
+      sessionCount,
+      customerId: booking.customerId,
+      coachId: booking.coachId,
+      currency: 'INR',
+      hourlyRate: breakdown.hourlyRate,
+      durationMinutes: breakdown.durationMinutes,
+      baseSessionFee: breakdown.baseSessionFee,
+      platformCommission: breakdown.platformCommission, // 20%
+      coachAllocation: breakdown.coachAllocation,       // 80%
+      taxRatePercentage: breakdown.taxRatePercentage,
+      taxAmount: breakdown.taxAmount,
+      totalCustomerPayable: breakdown.totalCustomerPayable,
+      amountInPaise: breakdown.amountInPaise,
+      paymentMethod: 'qr',
+      razorpayQrId: qrResult.id,
+      qrImageUrl: qrResult.image_url,
+      qrCloseBy: authoritativeCloseBy,
+      status: 'created',
+      payoutStatus: 'unsettled',
+      orderExpiresAt: qrExpiresAt,
+    });
+
+    await transaction.save();
+
+    if (booking.packageGroupId) {
+      await Booking.updateMany(
+        { packageGroupId: booking.packageGroupId },
+        { $set: { paymentTransactionId: transaction._id } }
+      );
+    } else {
+      booking.paymentTransactionId = transaction._id;
+      await booking.save();
+    }
+
+    return res.status(201).json({
+      qrId: qrResult.id,
+      imageUrl: qrResult.image_url,
+      amount: breakdown.totalCustomerPayable,
+      amountInPaise: breakdown.amountInPaise,
+      currency: 'INR',
+      closeBy: qrResult.close_by || closeBySeconds,
+      expiresAt: qrExpiresAt,
+      ...(booking.packageGroupId ? {
+        packageType: booking.packageType || 'single',
+        sessionCount,
+      } : {}),
+      breakdown: {
+        coachingFee: breakdown.baseSessionFee,
+        ...(booking.packageGroupId ? {
+          sessionCount: breakdown.sessionCount,
+          perSessionFee: breakdown.perSessionFee,
+        } : {}),
+        taxAmount: breakdown.taxAmount,
+        taxRatePercentage: breakdown.taxRatePercentage,
+        taxLabel: breakdown.taxLabel,
+        totalPayable: breakdown.totalCustomerPayable,
+      },
+      paymentDueAt: booking.paymentDueAt,
+      message: 'Payment QR created successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Check payment status of a QR code and reconcile with Razorpay gateway.
+ * GET /api/payments/qr-status/:bookingId
+ * Protected: 'parent', 'individual'.
+ */
+export async function getQrPaymentStatus(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { bookingId } = req.params;
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId.trim())) {
+      return res.status(400).json({ error: 'Valid bookingId is required.' });
+    }
+
+    const cleanBookingId = bookingId.trim();
+    const booking = await Booking.findById(cleanBookingId);
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+
+    const customerIdStr = (booking.customerId?._id || booking.customerId).toString();
+    const coachIdStr = (booking.coachId?._id || booking.coachId).toString();
+    const isCustomer = req.user.id === customerIdStr;
+    const isCoach = req.user.id === coachIdStr;
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isCustomer && !isCoach && !isAdmin) {
+      return res.status(403).json({
+        error: 'Access forbidden. You are not authorized to check payment status for this booking.',
+      });
+    }
+
+    // If booking is already paid
+    if (booking.paymentStatus === 'paid') {
+      const tx = await PaymentTransaction.findById(booking.paymentTransactionId);
+      return res.status(200).json({
+        isPaid: true,
+        isExpired: false,
+        paymentStatus: 'paid',
+        status: tx?.status || 'captured',
+        paymentId: tx?.razorpayPaymentId,
+        paidAt: tx?.paidAt,
+      });
+    }
+
+    // Find the latest QR transaction for this booking / package
+    const transaction = await PaymentTransaction.findOne({
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
+      paymentMethod: 'qr',
+    }).sort({ createdAt: -1 });
+
+    if (!transaction) {
+      return res.status(404).json({
+        error: 'No QR payment transaction found for this booking.',
+        code: 'QR_NOT_FOUND',
+      });
+    }
+
+    if (transaction.status === 'captured') {
+      return res.status(200).json({
+        isPaid: true,
+        isExpired: false,
+        paymentStatus: 'paid',
+        status: 'captured',
+        paymentId: transaction.razorpayPaymentId,
+        paidAt: transaction.paidAt,
+      });
+    }
+
+    const isDeadlineExpired = Boolean(
+      booking.paymentDueAt && new Date() > new Date(booking.paymentDueAt)
+    );
+    const isTxExpired = Boolean(
+      transaction.orderExpiresAt && new Date() > new Date(transaction.orderExpiresAt)
+    );
+    const isExpired = isTxExpired || isDeadlineExpired;
+
+    // A QR cannot remain payable after the booking payment deadline:
+    // If deadline has expired, transition unpaid booking to cancelled
+    if (isDeadlineExpired && booking.status === 'accepted' && booking.paymentStatus === 'unpaid') {
+      if (booking.packageGroupId) {
+        await Booking.updateMany(
+          {
+            packageGroupId: booking.packageGroupId,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
+          },
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      } else {
+        await Booking.updateOne(
+          {
+            _id: booking._id,
+            status: 'accepted',
+            paymentStatus: 'unpaid',
+          },
+          {
+            $set: {
+              status: 'cancelled',
+              cancellationReason: 'Payment window expired before completion.',
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      }
+    }
+
+    // Controlled gateway reconciliation architecture:
+    // Normal 4-second mobile polling reads the persisted backend status directly without making external calls.
+    // External gateway reconciliation is executed ONLY if:
+    // 1) Explicitly requested via query parameter ?reconcile=true (e.g. manual "Check Status" button click)
+    // 2) At least 15 seconds have elapsed since creation or previous reconciliation attempt
+    const forceReconcile = req.query.reconcile === 'true';
+    const lastReconciled = transaction.lastReconciledAt
+      ? new Date(transaction.lastReconciledAt).getTime()
+      : new Date(transaction.createdAt || 0).getTime();
+    const shouldReconcileGateway =
+      forceReconcile || Date.now() - lastReconciled > 15 * 1000;
+
+    if (
+      transaction.status === 'created' &&
+      transaction.razorpayQrId &&
+      shouldReconcileGateway &&
+      !isExpired
+    ) {
+      try {
+        await PaymentTransaction.updateOne(
+          { _id: transaction._id },
+          { $set: { lastReconciledAt: new Date() } }
+        );
+
+        const qrPayments = await fetchRazorpayQrPayments(transaction.razorpayQrId);
+        const capturedPayment = qrPayments.find(
+          (p) =>
+            p.status === 'captured' &&
+            p.amount === transaction.amountInPaise &&
+            (!p.currency || p.currency === 'INR')
+        );
+
+        if (capturedPayment) {
+          // Double verify payment entity from gateway
+          let verifiedEntity: RazorpayPaymentEntity | null = capturedPayment;
+          try {
+            const fetched = await fetchRazorpayPayment(capturedPayment.id);
+            if (fetched) verifiedEntity = fetched;
+          } catch {}
+
+          if (
+            verifiedEntity &&
+            verifiedEntity.status === 'captured' &&
+            verifiedEntity.amount === transaction.amountInPaise
+          ) {
+            // Confirm payment locally
+            await PaymentTransaction.updateOne(
+              { _id: transaction._id, status: { $nin: ['captured', 'refunded'] } },
+              {
+                $set: {
+                  status: 'captured',
+                  razorpayPaymentId: verifiedEntity.id,
+                  paidAt: new Date(),
+                  payoutStatus: 'simulated_held',
+                },
+              }
+            );
+
+            if (transaction.packageGroupId) {
+              await Booking.updateMany(
+                {
+                  packageGroupId: transaction.packageGroupId,
+                  status: 'accepted',
+                  paymentStatus: { $ne: 'refunded' },
+                },
+                { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+              );
+            } else {
+              await Booking.updateOne(
+                { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+              );
+            }
+
+            // Invalidate/fail any other active standard checkout transactions for this booking
+            await PaymentTransaction.updateMany(
+              {
+                $or: [
+                  { bookingId: transaction.bookingId },
+                  ...(transaction.packageGroupId ? [{ packageGroupId: transaction.packageGroupId }] : []),
+                ],
+                _id: { $ne: transaction._id },
+                status: { $in: ['created', 'attempted', 'authorized'] },
+              },
+              { $set: { status: 'failed', failureReason: 'Booking confirmed via QR payment' } }
+            );
+
+            return res.status(200).json({
+              isPaid: true,
+              isExpired: false,
+              paymentStatus: 'paid',
+              status: 'captured',
+              paymentId: verifiedEntity.id,
+              paidAt: new Date(),
+            });
+          }
+        }
+      } catch (pollErr: any) {
+        // If polling fails, fall through to reporting current transaction state
+      }
+    }
+
+    return res.status(200).json({
+      isPaid: false,
+      isExpired,
+      paymentStatus: booking.paymentStatus,
+      status: transaction.status,
+      qrId: transaction.razorpayQrId,
+      expiresAt: transaction.orderExpiresAt,
+      closeBy: transaction.qrCloseBy,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Manually close an active QR code payment.
+ * POST /api/payments/close-qr
+ * Protected: 'parent', 'individual', 'admin'.
+ */
+export async function closePaymentQr(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { bookingId, qrId } = req.body || {};
+    if (!bookingId && !qrId) {
+      return res.status(400).json({ error: 'bookingId or qrId is required.' });
+    }
+
+    let transaction: any = null;
+    if (qrId) {
+      transaction = await PaymentTransaction.findOne({ razorpayQrId: String(qrId).trim() });
+    } else if (bookingId && mongoose.Types.ObjectId.isValid(String(bookingId).trim())) {
+      transaction = await PaymentTransaction.findOne({
+        bookingId: String(bookingId).trim(),
+        paymentMethod: 'qr',
+        status: 'created',
+      }).sort({ createdAt: -1 });
+    }
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Active QR payment transaction not found.' });
+    }
+
+    // Ownership check
+    const customerIdStr = transaction.customerId.toString();
+    if (req.user.role !== 'admin' && customerIdStr !== req.user.id) {
+      return res.status(403).json({ error: 'Access forbidden.' });
+    }
+
+    if (transaction.status === 'created' && transaction.razorpayQrId) {
+      try {
+        await closeRazorpayQrCode(transaction.razorpayQrId);
+      } catch (closeErr) {
+        // Ignore gateway close error if already closed
+      }
+
+      await PaymentTransaction.updateOne(
+        { _id: transaction._id, status: 'created' },
+        {
+          $set: {
+            status: 'failed',
+            failureReason: 'Closed by user or expired',
+          },
+        }
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'QR payment closed successfully.',
     });
   } catch (error) {
     return next(error);
@@ -560,6 +1216,31 @@ export async function verifyPaymentSignature(
       }
     }
 
+    // Check if booking was already confirmed by another payment (e.g. concurrent QR payment)
+    if (
+      booking.paymentStatus === 'paid' &&
+      booking.paymentTransactionId &&
+      !booking.paymentTransactionId.equals(transaction._id)
+    ) {
+      transaction.status = 'captured';
+      transaction.razorpayPaymentId = cleanPaymentId;
+      transaction.razorpaySignature = cleanSignature;
+      transaction.paidAt = paidAt;
+      transaction.payoutStatus = 'unsettled';
+      transaction.hasReconciliationDiscrepancy = true;
+      transaction.reconciliationDiscrepancyReason = `Late duplicate payment received: booking was already confirmed by transaction ${booking.paymentTransactionId}`;
+      transaction.hasExcessRefundAlert = true;
+      transaction.excessRefundReason = 'DUPLICATE_PAYMENT_REQUIRES_REFUND';
+      await transaction.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment received but booking was already confirmed by another payment. Flagged for refund.',
+        booking: serializeBookingForUser(booking, req.user.id, req.user.role),
+        duplicate: true,
+      });
+    }
+
     // Atomic conditional booking transition: strictly requires status 'accepted'
     if (transaction.packageGroupId) {
       await Booking.updateMany(
@@ -598,6 +1279,25 @@ export async function verifyPaymentSignature(
       return res.status(400).json({
         error: `Cannot confirm payment: booking is in status "${current?.status || 'unknown'}".`,
       });
+    }
+
+    // Close and invalidate any active QR codes for this booking
+    const activeQrTx = await PaymentTransaction.findOne({
+      $or: [
+        { bookingId: booking._id },
+        ...(booking.packageGroupId ? [{ packageGroupId: booking.packageGroupId }] : []),
+      ],
+      paymentMethod: 'qr',
+      status: 'created',
+    });
+    if (activeQrTx && activeQrTx.razorpayQrId) {
+      try {
+        await closeRazorpayQrCode(activeQrTx.razorpayQrId);
+      } catch {}
+      await PaymentTransaction.updateOne(
+        { _id: activeQrTx._id, status: 'created' },
+        { $set: { status: 'failed', failureReason: 'Booking confirmed via standard checkout' } }
+      );
     }
 
     const serialized = serializeBookingForUser(updatedBooking, req.user.id, req.user.role);
@@ -978,7 +1678,8 @@ export async function handlePaymentWebhook(
     const eventIdBody = req.body?.id || req.body?.event_id;
     const paymentEntityId = payload.payment?.entity?.id;
     const orderEntityId = payload.order?.entity?.id || payload.payment?.entity?.order_id;
-    const fallbackEventId = `${event}_${orderEntityId || ''}_${paymentEntityId || ''}_${req.body?.created_at || ''}`;
+    const qrEntityId = payload.qr_code?.entity?.id;
+    const fallbackEventId = `${event}_${orderEntityId || qrEntityId || ''}_${paymentEntityId || ''}_${req.body?.created_at || ''}`;
     const deduplicationKey = (eventIdHeader || eventIdBody || fallbackEventId).trim();
 
     if (deduplicationKey) {
@@ -1037,7 +1738,35 @@ export async function handlePaymentWebhook(
           if (transaction) {
             // Verify amount and currency integrity
             if (amount === transaction.amountInPaise && currency === 'INR') {
-              if (transaction.status !== 'captured' && transaction.status !== 'refunded') {
+              const booking = await Booking.findById(transaction.bookingId);
+              const isAlreadyPaidByOther =
+                booking?.paymentStatus === 'paid' &&
+                booking.paymentTransactionId &&
+                !booking.paymentTransactionId.equals(transaction._id);
+              const isCancelledOrInvalid = !booking || booking.status !== 'accepted';
+
+              if (isAlreadyPaidByOther || isCancelledOrInvalid) {
+                // Record duplicate / orphan payment exception for reconciliation/refund without applying ledger twice
+                const discrepancyReason = isAlreadyPaidByOther
+                  ? `Late duplicate payment received: booking was already confirmed by transaction ${booking?.paymentTransactionId}`
+                  : `Payment received for booking in invalid status "${booking?.status || 'deleted'}". Ledger not applied.`;
+
+                await PaymentTransaction.updateOne(
+                  { _id: transaction._id },
+                  {
+                    $set: {
+                      status: 'captured',
+                      razorpayPaymentId: paymentId,
+                      paidAt: new Date(),
+                      payoutStatus: 'unsettled',
+                      hasReconciliationDiscrepancy: true,
+                      reconciliationDiscrepancyReason: discrepancyReason,
+                      hasExcessRefundAlert: true,
+                      excessRefundReason: 'DUPLICATE_OR_CANCELLED_PAYMENT_REQUIRES_REFUND',
+                    },
+                  }
+                );
+              } else if (transaction.status !== 'captured' && transaction.status !== 'refunded') {
                 await PaymentTransaction.updateOne(
                   { _id: transaction._id, status: { $nin: ['captured', 'refunded'] } },
                   {
@@ -1059,6 +1788,26 @@ export async function handlePaymentWebhook(
                   await Booking.updateOne(
                     { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
                     { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                }
+
+                // Invalidate and close any active QR code for this booking
+                const activeQrTx = await PaymentTransaction.findOne({
+                  $or: [
+                    { bookingId: transaction.bookingId },
+                    ...(transaction.packageGroupId ? [{ packageGroupId: transaction.packageGroupId }] : []),
+                  ],
+                  _id: { $ne: transaction._id },
+                  paymentMethod: 'qr',
+                  status: 'created',
+                });
+                if (activeQrTx && activeQrTx.razorpayQrId) {
+                  try {
+                    await closeRazorpayQrCode(activeQrTx.razorpayQrId);
+                  } catch {}
+                  await PaymentTransaction.updateOne(
+                    { _id: activeQrTx._id, status: 'created' },
+                    { $set: { status: 'failed', failureReason: 'Booking confirmed via standard checkout' } }
                   );
                 }
               }
@@ -1213,6 +1962,176 @@ export async function handlePaymentWebhook(
         }
       }
 
+      // 8. Handle qr_code.credited (Payment received via dynamic UPI QR)
+      if (event === 'qr_code.credited') {
+        const qrEntity = payload.qr_code?.entity;
+        const paymentEntity = payload.payment?.entity;
+        const webhookQrId = qrEntity?.id;
+        const paymentId = paymentEntity?.id;
+
+        if (webhookQrId && paymentId) {
+          const transaction = await PaymentTransaction.findOne({ razorpayQrId: webhookQrId });
+          // Strictly confirm that the stored Razorpay QR ID matches the signed webhook QR entity ID
+          if (transaction && transaction.razorpayQrId === webhookQrId) {
+            let isQrAssociated = false;
+            let authoritativePayment: RazorpayPaymentEntity | null = null;
+
+            // 1. Authoritative check via Razorpay's QR-specific payment-fetch API:
+            // GET https://api.razorpay.com/v1/payments/qr_codes/:qrId/payments
+            try {
+              const qrPayments = await fetchRazorpayQrPayments(webhookQrId);
+              const foundInQr = qrPayments.find((p) => p.id === paymentId);
+              if (foundInQr) {
+                isQrAssociated = true;
+                authoritativePayment = foundInQr;
+              }
+            } catch (err: any) {
+              console.warn(
+                `[Webhook:qr_code.credited] QR payments fetch failed for ${webhookQrId}: ${err?.message}`
+              );
+            }
+
+            // 2. Authoritative check via direct payment entity for status and explicit qr_code_id association
+            try {
+              const directPayment = await fetchRazorpayPayment(paymentId);
+              if (directPayment) {
+                const directQrId = (directPayment as any).qr_code_id;
+                if (directQrId) {
+                  if (directQrId === transaction.razorpayQrId) {
+                    isQrAssociated = true;
+                  } else {
+                    // Explicit mismatch: payment entity is tied to a DIFFERENT QR ID!
+                    isQrAssociated = false;
+                  }
+                }
+                if (!authoritativePayment || isQrAssociated) {
+                  authoritativePayment = directPayment;
+                }
+              }
+            } catch (err: any) {
+              console.warn(
+                `[Webhook:qr_code.credited] Direct payment fetch failed for ${paymentId}: ${err?.message}`
+              );
+            }
+
+            // Webhook payload payment entity mismatch check
+            const payloadQrId = (paymentEntity as any)?.qr_code_id;
+            if (payloadQrId && payloadQrId !== transaction.razorpayQrId) {
+              isQrAssociated = false;
+            }
+
+            // Strict rejection if association cannot be authoritatively proven or belongs to a different QR
+            if (!isQrAssociated) {
+              console.warn(
+                `[Webhook:qr_code.credited] Payment ${paymentId} rejected: not authoritatively associated with QR ${transaction.razorpayQrId}`
+              );
+              return res.status(200).json({
+                received: true,
+                ignored: true,
+                reason: 'PAYMENT_NOT_ASSOCIATED_WITH_QR',
+              });
+            }
+
+            const paymentToCheck = authoritativePayment || paymentEntity;
+            const isCaptured =
+              paymentToCheck &&
+              (paymentToCheck.status === 'captured' || paymentToCheck.captured === true) &&
+              paymentToCheck.amount === transaction.amountInPaise &&
+              (!paymentToCheck.currency || paymentToCheck.currency === 'INR');
+
+            if (isCaptured) {
+              const booking = await Booking.findById(transaction.bookingId);
+              const isDeadlineExpired = Boolean(
+                booking?.paymentDueAt && new Date() > new Date(booking.paymentDueAt)
+              );
+              const isAlreadyPaidByOther =
+                booking?.paymentStatus === 'paid' &&
+                booking.paymentTransactionId &&
+                !booking.paymentTransactionId.equals(transaction._id);
+              const isCancelledOrInvalid = !booking || booking.status !== 'accepted' || isDeadlineExpired;
+
+              if (isAlreadyPaidByOther || isCancelledOrInvalid) {
+                // Record duplicate / orphan payment exception for reconciliation/refund without applying ledger twice
+                const discrepancyReason = isAlreadyPaidByOther
+                  ? `Late duplicate payment received: booking was already confirmed by transaction ${booking?.paymentTransactionId}`
+                  : isDeadlineExpired
+                  ? 'Payment received after booking payment deadline expired. Ledger not applied.'
+                  : `Payment received for booking in invalid status "${booking?.status || 'deleted'}". Ledger not applied.`;
+
+                await PaymentTransaction.updateOne(
+                  { _id: transaction._id },
+                  {
+                    $set: {
+                      status: 'captured',
+                      razorpayPaymentId: paymentId,
+                      paidAt: new Date(),
+                      payoutStatus: 'unsettled',
+                      hasReconciliationDiscrepancy: true,
+                      reconciliationDiscrepancyReason: discrepancyReason,
+                      hasExcessRefundAlert: true,
+                      excessRefundReason: 'DUPLICATE_OR_CANCELLED_PAYMENT_REQUIRES_REFUND',
+                    },
+                  }
+                );
+              } else if (transaction.status !== 'captured' && transaction.status !== 'refunded') {
+                await PaymentTransaction.updateOne(
+                  { _id: transaction._id, status: { $nin: ['captured', 'refunded'] } },
+                  {
+                    $set: {
+                      status: 'captured',
+                      razorpayPaymentId: paymentId,
+                      paidAt: new Date(),
+                      payoutStatus: 'simulated_held',
+                    },
+                  }
+                );
+
+                if (transaction.packageGroupId) {
+                  await Booking.updateMany(
+                    {
+                      packageGroupId: transaction.packageGroupId,
+                      status: 'accepted',
+                      paymentStatus: { $ne: 'refunded' },
+                    },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                } else {
+                  await Booking.updateOne(
+                    { _id: transaction.bookingId, status: 'accepted', paymentStatus: { $ne: 'refunded' } },
+                    { $set: { paymentStatus: 'paid', paymentTransactionId: transaction._id } }
+                  );
+                }
+
+                // Invalidate any other active standard checkout transactions for this booking
+                await PaymentTransaction.updateMany(
+                  {
+                    $or: [
+                      { bookingId: transaction.bookingId },
+                      ...(transaction.packageGroupId ? [{ packageGroupId: transaction.packageGroupId }] : []),
+                    ],
+                    _id: { $ne: transaction._id },
+                    status: { $in: ['created', 'attempted', 'authorized'] },
+                  },
+                  { $set: { status: 'failed', failureReason: 'Booking confirmed via QR payment' } }
+                );
+              }
+            }
+          }
+        }
+      }
+
+      // 9. Handle qr_code.closed
+      if (event === 'qr_code.closed') {
+        const qrEntity = payload.qr_code?.entity;
+        const qrId = qrEntity?.id;
+        if (qrId) {
+          await PaymentTransaction.updateOne(
+            { razorpayQrId: qrId, status: 'created' },
+            { $set: { status: 'failed', failureReason: 'QR code closed' } }
+          );
+        }
+      }
+
       // Mark webhook event completed upon successful execution
       if (deduplicationKey) {
         await WebhookEvent.updateOne(
@@ -1296,6 +2215,10 @@ export async function getBookingPaymentStatus(
         transaction: transaction
           ? {
               orderId: transaction.razorpayOrderId,
+              paymentMethod: transaction.paymentMethod || 'standard',
+              qrId: transaction.razorpayQrId,
+              qrImageUrl: transaction.qrImageUrl,
+              qrCloseBy: transaction.qrCloseBy,
               paymentId: transaction.razorpayPaymentId,
               status: transaction.status,
               refundStatus: transaction.refundStatus,
@@ -1335,7 +2258,9 @@ export async function getBookingPaymentStatus(
       ledger: transaction
         ? {
             transactionId: transaction._id,
+            paymentMethod: transaction.paymentMethod || 'standard',
             orderId: transaction.razorpayOrderId,
+            qrId: transaction.razorpayQrId,
             paymentId: transaction.razorpayPaymentId,
             status: transaction.status,
             refundStatus: transaction.refundStatus,
@@ -1369,7 +2294,7 @@ export async function getBookingPaymentStatus(
 
 export interface ReconciliationResult {
   paymentId: string;
-  orderId: string;
+  orderId?: string;
   localAmountInPaise: number;
   gatewayAmountInPaise: number;
   localRefundedAmountInPaise: number;

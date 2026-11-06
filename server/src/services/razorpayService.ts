@@ -120,6 +120,34 @@ export interface RazorpayRefundCollection {
   items: RazorpayRefundEntity[];
 }
 
+export interface CreateQrParams {
+  amountInPaise: number;
+  name?: string;
+  description?: string;
+  closeBy?: number; // Unix timestamp
+  notes?: Record<string, string>;
+  customer_id?: string;
+}
+
+export interface RazorpayQrResult {
+  id: string;
+  entity: string;
+  created_at: number;
+  name: string;
+  usage: 'single_use' | 'multiple_use';
+  type: 'upi_qr';
+  image_url: string;
+  payment_amount: number;
+  status: 'active' | 'closed';
+  description?: string;
+  fixed_amount: boolean;
+  payments_amount_received?: number;
+  payments_count_received?: number;
+  notes?: Record<string, string>;
+  customer_id?: string;
+  close_by?: number;
+}
+
 /**
  * Creates an order directly with Razorpay test mode API.
  * Fails safely if credentials are unconfigured or gateway is unavailable.
@@ -173,6 +201,235 @@ export async function createRazorpayOrder(
   }
 
   return (await response.json()) as RazorpayOrderResult;
+}
+
+/**
+ * Creates a dynamic single-use UPI QR code directly with Razorpay API.
+ * POST https://api.razorpay.com/v1/payments/qr_codes
+ */
+export async function createRazorpayQrCode(
+  params: CreateQrParams,
+  options?: { keyId?: string; keySecret?: string }
+): Promise<RazorpayQrResult> {
+  const keyId = options?.keyId || config.RAZORPAY_KEY_ID;
+  const keySecret = options?.keySecret || config.RAZORPAY_KEY_SECRET;
+
+  if (keyId.startsWith('rzp_live_')) {
+    throw new Error('SECURITY VIOLATION: Live Razorpay credentials rejected in sandbox mode.');
+  }
+
+  if (!keyId || !keySecret || keyId.includes('placeholder') || keySecret.includes('placeholder')) {
+    throw new Error('Razorpay payment gateway credentials are not configured.');
+  }
+
+  const {
+    amountInPaise,
+    name = 'AthleteConnect Booking',
+    description = 'AthleteConnect booking payment',
+    closeBy,
+    notes,
+    customer_id,
+  } = params;
+
+  // Enforce maximum 2-hour QR expiry if closeBy is provided
+  const now = Math.floor(Date.now() / 1000);
+  const maxLifetimeSeconds = 2 * 60 * 60; // 2 hours
+  let finalCloseBy = closeBy;
+  if (finalCloseBy && finalCloseBy > now + maxLifetimeSeconds) {
+    finalCloseBy = now + maxLifetimeSeconds;
+  }
+
+  const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+  let response: Response;
+  try {
+    response = await fetch('https://api.razorpay.com/v1/payments/qr_codes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${authHeader}`,
+      },
+      body: JSON.stringify({
+        type: 'upi_qr',
+        name,
+        usage: 'single_use',
+        fixed_amount: true,
+        payment_amount: amountInPaise,
+        description,
+        ...(finalCloseBy ? { close_by: finalCloseBy } : {}),
+        ...(notes ? { notes } : {}),
+        ...(customer_id ? { customer_id } : {}),
+      }),
+    });
+  } catch (err: any) {
+    throw new Error(`Failed to reach Razorpay gateway: ${err?.message || 'Network error'}`);
+  }
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status}`;
+    let gatewayCode: string | undefined;
+    let isNotActivated = false;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error) {
+        gatewayCode = errJson.error.code;
+        if (errJson.error.description) {
+          errorDetail = errJson.error.description;
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+
+    const lowerDetail = errorDetail.toLowerCase();
+    // Only classify as activation failure if explicitly indicated by feature unavailability or unmapped endpoint description
+    if (
+      (response.status === 400 && errorDetail.includes('The requested URL was not found on the server')) ||
+      lowerDetail.includes('feature is not active') ||
+      lowerDetail.includes('not enabled') ||
+      lowerDetail.includes('activation required') ||
+      gatewayCode === 'FEATURE_NOT_AVAILABLE'
+    ) {
+      isNotActivated = true;
+    }
+
+    if (isNotActivated) {
+      const activationErr = new Error(
+        'Razorpay Dynamic UPI QR payments are not enabled for this account. Account activation with Razorpay is required.'
+      );
+      (activationErr as any).code = 'RAZORPAY_QR_NOT_ACTIVATED';
+      (activationErr as any).gatewayError = errorDetail;
+      (activationErr as any).gatewayCode = gatewayCode;
+      throw activationErr;
+    }
+
+    const gatewayErr = new Error(`Razorpay QR code creation failed: ${errorDetail}`);
+    (gatewayErr as any).gatewayCode = gatewayCode;
+    (gatewayErr as any).statusCode = response.status;
+    throw gatewayErr;
+  }
+
+  return (await response.json()) as RazorpayQrResult;
+}
+
+/**
+ * Fetches all payments associated with a specific Razorpay QR code.
+ * GET https://api.razorpay.com/v1/payments/qr_codes/:id/payments
+ */
+export async function fetchRazorpayQrPayments(
+  qrId: string,
+  options?: { keyId?: string; keySecret?: string }
+): Promise<RazorpayPaymentEntity[]> {
+  const keyId = options?.keyId || config.RAZORPAY_KEY_ID;
+  const keySecret = options?.keySecret || config.RAZORPAY_KEY_SECRET;
+
+  if (keyId.startsWith('rzp_live_')) {
+    throw new Error('SECURITY VIOLATION: Live Razorpay credentials rejected.');
+  }
+
+  if (!keyId || !keySecret || keyId.includes('placeholder') || keySecret.includes('placeholder')) {
+    throw new Error('Razorpay payment gateway credentials are not configured.');
+  }
+
+  if (!qrId || typeof qrId !== 'string' || !qrId.trim()) {
+    return [];
+  }
+
+  const cleanQrId = qrId.trim();
+  const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.razorpay.com/v1/payments/qr_codes/${encodeURIComponent(cleanQrId)}/payments`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${authHeader}`,
+        },
+      }
+    );
+  } catch (err: any) {
+    throw new Error(`Failed to reach Razorpay gateway: ${err?.message || 'Network error'}`);
+  }
+
+  if (response.status === 404) {
+    return [];
+  }
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error?.description) {
+        errorDetail = errJson.error.description;
+      }
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(`Razorpay QR payments fetch failed: ${errorDetail}`);
+  }
+
+  const data: any = await response.json();
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
+/**
+ * Manually closes an active Razorpay QR code.
+ * POST https://api.razorpay.com/v1/payments/qr_codes/:id/close
+ */
+export async function closeRazorpayQrCode(
+  qrId: string,
+  options?: { keyId?: string; keySecret?: string }
+): Promise<RazorpayQrResult | null> {
+  const keyId = options?.keyId || config.RAZORPAY_KEY_ID;
+  const keySecret = options?.keySecret || config.RAZORPAY_KEY_SECRET;
+
+  if (keyId.startsWith('rzp_live_')) {
+    throw new Error('SECURITY VIOLATION: Live Razorpay credentials rejected.');
+  }
+
+  if (!keyId || !keySecret || keyId.includes('placeholder') || keySecret.includes('placeholder')) {
+    throw new Error('Razorpay payment gateway credentials are not configured.');
+  }
+
+  if (!qrId || typeof qrId !== 'string' || !qrId.trim()) {
+    return null;
+  }
+
+  const cleanQrId = qrId.trim();
+  const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.razorpay.com/v1/payments/qr_codes/${encodeURIComponent(cleanQrId)}/close`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${authHeader}`,
+        },
+      }
+    );
+  } catch (err: any) {
+    throw new Error(`Failed to reach Razorpay gateway: ${err?.message || 'Network error'}`);
+  }
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error?.description) {
+        errorDetail = errJson.error.description;
+      }
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(`Razorpay QR close failed: ${errorDetail}`);
+  }
+
+  return (await response.json()) as RazorpayQrResult;
 }
 
 /**

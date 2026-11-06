@@ -359,7 +359,7 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
               accessibilityLabel={`Open directions in Google Maps for ${booking.coachName || 'coach'}`}
               testID={`button-maps-${booking._id}`}
             >
-              <Navigation size={13} color={COLORS.navy} />
+              <Navigation size={12} color={COLORS.navy} />
               <Text style={styles.mapsButtonText}>Maps</Text>
             </TouchableOpacity>
           ) : null}
@@ -372,7 +372,7 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
               accessibilityLabel={`Chat with ${booking.coachName || 'coach'}`}
               testID={`button-chat-${booking._id}`}
             >
-              <MessageSquare size={13} color={COLORS.navy} />
+              <MessageSquare size={12} color={COLORS.navy} />
               <Text style={styles.chatButtonText}>Chat</Text>
             </TouchableOpacity>
           ) : null}
@@ -386,7 +386,7 @@ export const CustomerBookingCard: React.FC<CustomerBookingCardProps> = ({
               accessibilityLabel={`Cancel booking with ${booking.coachName || 'coach'}`}
               testID={`button-cancel-${booking._id}`}
             >
-              <XCircle size={14} color="#DC2626" />
+              <XCircle size={12} color="#DC2626" />
               <Text style={styles.cancelButtonText}>
                 {isCancelling ? 'Cancelling...' : 'Cancel Booking'}
               </Text>
@@ -566,8 +566,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
+    gap: 6,
     marginTop: SPACING.sm,
     paddingTop: SPACING.xs,
     borderTopWidth: 1,
@@ -575,22 +574,22 @@ const styles = StyleSheet.create({
   },
   payCtaContainer: {
     alignItems: 'center',
-    gap: 3,
+    gap: 2,
   },
   recommendedBadge: {
     backgroundColor: '#FFF7ED',
-    paddingHorizontal: 7,
-    paddingVertical: 1.5,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     borderRadius: RADII.full,
     borderWidth: 1,
     borderColor: 'rgba(249, 115, 22, 0.35)',
   },
   recommendedBadgeText: {
     ...TYPOGRAPHY.caption,
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: '700',
     color: '#C2410C',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   rateButton: {
     flexDirection: 'row',
@@ -608,7 +607,7 @@ const styles = StyleSheet.create({
     color: COLORS.navy,
   },
   payButton: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 5,
     backgroundColor: COLORS.orange,
     borderRadius: RADII.sm,
@@ -617,7 +616,7 @@ const styles = StyleSheet.create({
   },
   payButtonText: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     color: COLORS.navy,
   },
@@ -675,8 +674,8 @@ const styles = StyleSheet.create({
   mapsButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: SPACING.sm,
+    gap: 3,
+    paddingHorizontal: 6,
     paddingVertical: 5,
     borderRadius: RADII.sm,
     borderWidth: 1,
@@ -685,15 +684,15 @@ const styles = StyleSheet.create({
   },
   mapsButtonText: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '600',
     color: COLORS.navy,
   },
   chatButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: SPACING.sm,
+    gap: 3,
+    paddingHorizontal: 6,
     paddingVertical: 5,
     borderRadius: RADII.sm,
     borderWidth: 1,
@@ -702,15 +701,15 @@ const styles = StyleSheet.create({
   },
   chatButtonText: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '600',
     color: COLORS.navy,
   },
   cancelButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: SPACING.sm,
+    gap: 3,
+    paddingHorizontal: 6,
     paddingVertical: 5,
     borderRadius: RADII.sm,
     borderWidth: 1,
@@ -719,7 +718,7 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '600',
     color: '#DC2626',
   },

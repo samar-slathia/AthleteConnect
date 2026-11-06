@@ -52,7 +52,11 @@ export interface IPaymentTransaction {
   taxAmount: number;
   totalCustomerPayable: number;
   amountInPaise: number;
-  razorpayOrderId: string;
+  paymentMethod?: 'standard' | 'qr';
+  razorpayOrderId?: string;
+  razorpayQrId?: string;
+  qrImageUrl?: string;
+  qrCloseBy?: number;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
   status: PaymentTransactionStatus;
@@ -163,12 +167,31 @@ const PaymentTransactionSchema = new Schema<IPaymentTransactionDocument>(
       required: true,
       min: 0,
     },
+    paymentMethod: {
+      type: String,
+      enum: ['standard', 'qr'],
+      default: 'standard',
+      index: true,
+    },
     razorpayOrderId: {
       type: String,
-      required: true,
+      sparse: true,
+      index: true,
+      trim: true,
+    },
+    razorpayQrId: {
+      type: String,
+      sparse: true,
       unique: true,
       index: true,
       trim: true,
+    },
+    qrImageUrl: {
+      type: String,
+      trim: true,
+    },
+    qrCloseBy: {
+      type: Number,
     },
     razorpayPaymentId: {
       type: String,
@@ -289,6 +312,7 @@ const PaymentTransactionSchema = new Schema<IPaymentTransactionDocument>(
 PaymentTransactionSchema.index({ bookingId: 1, status: 1 });
 PaymentTransactionSchema.index({ customerId: 1, createdAt: -1 });
 PaymentTransactionSchema.index({ packageGroupId: 1, status: 1 });
+PaymentTransactionSchema.index({ razorpayQrId: 1, status: 1 });
 
 export const PaymentTransaction: Model<IPaymentTransactionDocument> =
   (mongoose.models.PaymentTransaction as Model<IPaymentTransactionDocument>) ||

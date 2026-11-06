@@ -47,6 +47,33 @@ export interface VerifyPaymentResponse {
   };
 }
 
+export interface PaymentQrResponse {
+  qrId: string;
+  imageUrl: string;
+  amount: number;
+  amountInPaise: number;
+  currency: string;
+  closeBy?: number;
+  expiresAt?: string;
+  packageType?: 'single' | 'weekly' | 'monthly';
+  sessionCount?: number;
+  breakdown: PaymentBreakdown;
+  paymentDueAt?: string;
+  message?: string;
+}
+
+export interface PaymentQrStatusResponse {
+  isPaid: boolean;
+  isExpired: boolean;
+  paymentStatus: PaymentStatus;
+  status: string;
+  paymentId?: string;
+  qrId?: string;
+  expiresAt?: string;
+  closeBy?: number;
+  paidAt?: string;
+}
+
 export type PaymentStatus = 'unpaid' | 'paid' | 'partially_refunded' | 'refunded';
 export type RefundStatus = 'none' | 'pending' | 'partially_refunded' | 'processed' | 'failed';
 
@@ -213,6 +240,115 @@ export async function getBookingPayment(
       Accept: 'application/json',
       Authorization: `Bearer ${token.trim()}`,
     },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Creates a Razorpay Dynamic UPI QR code for an accepted booking.
+ * POST /api/payments/create-qr
+ */
+export async function createPaymentQr(
+  bookingId: string,
+  token: string
+): Promise<PaymentQrResponse> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.PAYMENTS}/create-qr`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+    body: JSON.stringify({ bookingId: bookingId.trim() }),
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Checks status of Razorpay QR code payment for a booking.
+ * GET /api/payments/qr-status/:bookingId
+ * Normal 4-second polling queries local DB.
+ * Manual refresh passes { reconcile: true } to trigger gateway reconciliation.
+ */
+export async function getQrPaymentStatus(
+  bookingId: string,
+  token: string,
+  options?: { reconcile?: boolean }
+): Promise<PaymentQrStatusResponse> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  if (!bookingId || !bookingId.trim()) {
+    throw new AuthApiError('Booking ID is required.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const queryStr = options?.reconcile ? '?reconcile=true' : '';
+  const url = `${baseUrl}${API_ENDPOINTS.PAYMENTS}/qr-status/${encodeURIComponent(bookingId.trim())}${queryStr}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorMessage = await parseResponseError(response, token);
+    throw new AuthApiError(errorMessage, response.status);
+  }
+
+  return response.json();
+}
+
+/**
+ * Closes an active QR code payment.
+ * POST /api/payments/close-qr
+ */
+export async function closePaymentQr(
+  bookingId: string,
+  token: string
+): Promise<{ success: boolean; message: string }> {
+  if (!token || !token.trim()) {
+    throw new AuthApiError('Authentication token is required.', 401);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.PAYMENTS}/close-qr`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    },
+    body: JSON.stringify({ bookingId: bookingId.trim() }),
   });
 
   if (!response.ok) {
